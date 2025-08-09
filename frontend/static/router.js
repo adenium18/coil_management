@@ -1,32 +1,27 @@
-import Home from "./components/Home.js";
 import Login from "./components/Login.js";
 import appinfo from "./components/appinfo.js"
-import AdminHome from "./components/AdminHome.js";
-import AllComplaints from "./components/AllComplaints.js";
-import SearchDoctorResults from "./components/SearchDoctorResults.js";
-import PatientHistory from "./components/PatientHistory.js";
-import DoctorSignup from "./components/DoctorSignup.js";
-import Patients from "./components/Patients.js"
-import Casepaper from "./components/Casepaper.js";
-//import ServiceProfessionalSignup from "./components/ServiceProfessionalSignup.js";
-//import Users from "./components/Users.js";
-//import ServiceForm from "./components/ServiceForm.js";
-//import UpdatePatinet from "./components/UpdateServiceForm.js";
-
-
-
+import AdminHome from "./components/adminhome.js";
+import Purchase from "./components/purchase.js";
+import Customers from "./components/customer.js"
+import Coils from "./components/coil_info.js"
+import Products from "./components/product_info.js";
+import Sales from "./components/sale.js";
+import ProductForm from "./components/productform.js";
+import UpdateProductForm from "./components/updateproductform.js";
 
 
 const routes = [
-    { path: "/", component: Home, meta: { requiresAuth: true } },
+    { path: "/", component: AdminHome, meta: { requiresAuth: true } },
     { path: "/app_info", component:appinfo},
-    { path: "/user-login", component: Login },    
-    { path: "/doctor-signup", component: DoctorSignup},
-    { path: '/patient_history', component: PatientHistory},
-    { path: '/search-for-doctor', component: SearchDoctorResults},
-    { path: '/all_complaints', component: AllComplaints},
-    { path: '/patients', component: Patients},
-    { path: '/casepapers', component: Casepaper}
+    { path: "/user_login", component: Login},
+    { path: '/purchase_history', component: Purchase},
+    { path: '/customer_info', component: Customers},
+    { path: '/coil_info', component: Coils},
+    { path: '/product_info', component: Products},
+    { path: '/sales', component: Sales},
+    { path: "/create-product", component:ProductForm},
+    { path:"/update-product", component:UpdateProductForm}
+
 ];
 
 const router = new VueRouter({

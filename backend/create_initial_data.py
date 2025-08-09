@@ -1,20 +1,31 @@
 from flask import current_app as app
 from flask_security import SQLAlchemyUserDatastore, hash_password
 
-from backend.models import db, Product, Party, Purchase, Coil, Sale, SaleItem, SaleCoil
+from backend.models import db, Product, Party, Coil, Sale, SaleItem, SaleCoil
 from datetime import datetime
 
 with app.app_context():
     db.create_all()
 
-    # Example Products
-    if not Product.query.filter_by(make="SteelCo").first():
-        prod1 = Product(make="JSW", type="Coloron", color="Silver", rate=50.0)
-        prod2 = Product(make="JSW", type="Pragati", color="red", rate=45.0)
-        db.session.add_all([prod1, prod2])
+    userdatastore : SQLAlchemyUserDatastore = app.security.datastore
+
+    userdatastore.find_or_create_role(id=1, name="admin", description="admin")
+    if not userdatastore.find_user(email="admin@abc.in"):
+        userdatastore.create_user(
+            email="admin@abc.in",
+            password=hash_password("pass"),
+            roles=["admin"],
+        )
         db.session.commit()
 
-    # Example Party
+    # Example Products
+    if not Product.query.filter_by(make="JSW").first():
+        prod1 = Product(make="JSW", type="Coloron", color="Silver", rate=50.0)
+        
+        db.session.add(prod1)
+        db.session.commit()
+
+    ''''# Example Party
     if not Party.query.filter_by(name="Kumar SV").first():
         party = Party(name="Kumar SV", phone="9876543210")
         db.session.add(party)
@@ -22,25 +33,15 @@ with app.app_context():
     else:
         party = Party.query.filter_by(name="Kumar SV").first()
 
-    # Example Purchase (buying coils)
-    purchase = Purchase(
-        date=datetime.utcnow(),
-        supplier_name="Steel Traders",
-        total_weight=5000,
-        total_cost=250000
-    )
-    db.session.add(purchase)
-    db.session.commit()
 
     # Example Coils for the purchase
-    coil1 = Coil(coil_number="C001", weight=1000, length=500, purchase_id=purchase.id)
-    coil2 = Coil(coil_number="C002", weight=1200, length=600, purchase_id=purchase.id)
-    db.session.add_all([coil1, coil2])
+    coil1 = Coil(coil_number="C001", purchase_date=datetime.now(), supplier_name="Steel Traders", total_weight=5000, purchase_price=250000)
+    db.session.add(coil1)
     db.session.commit()
 
     # Example Sale
     sale = Sale(
-        date=datetime.utcnow(),
+        date=datetime.now(),
         party_id=party.id,
         product_id=prod1.id,
         total_amount=2000  # (for now, set directly)
@@ -69,14 +70,15 @@ with app.app_context():
         db.session.add(sale_item)
 
     db.session.commit()
+    
     sale.total_amount = sum(i.amount for i in sale.items)
     db.session.commit()
     
     
     # Example SaleCoil usage (which coils were used in sale)
-    sale_coil1 = SaleCoil(sale_id=sale.id, coil_id=coil1.id)
-    sale_coil2 = SaleCoil(sale_id=sale.id, coil_id=coil2.id)
-    db.session.add_all([sale_coil1, sale_coil2])
+    sale_coil1 = SaleCoil(sale_id=sale.id, coil_number=coil1.coil_number)
+    
+    db.session.add(sale_coil1)
     db.session.commit()
-
+'''
     print("✅ Initial data populated successfully.")

@@ -11,7 +11,7 @@ export const fetchWithAuth = async (url = '/', options = {auth : true}) => {
     if (options.auth && !authToken) {
       console.error('Authentication token is missing.');
       // Optionally, redirect to login or return an error
-      router.push('/user-login');
+      router.push('/user_login');
       return;
     }
   
@@ -34,7 +34,7 @@ export const fetchWithAuth = async (url = '/', options = {auth : true}) => {
   
       // If response is forbidden, redirect to login
       if (res.status === 403 || res.status === 405) {
-        router.push('/user-login');
+        router.push('/user_login');
         return;
       }
   

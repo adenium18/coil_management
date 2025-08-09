@@ -1,7 +1,30 @@
 from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime
+from flask_security import UserMixin,RoleMixin
 
 db = SQLAlchemy()
+
+
+class RolesUsers(db.Model):
+    __tablename__ = "roles_users"
+    id = db.Column(db.Integer(), primary_key=True)
+    user_id = db.Column("user_id", db.Integer(), db.ForeignKey("user.id"))
+    role_id = db.Column("role_id", db.Integer(), db.ForeignKey("role.id"))
+
+class Role(db.Model, RoleMixin):
+    id = db.Column(db.Integer(), primary_key=True)
+    name = db.Column(db.String(80), unique=True)
+    description = db.Column(db.String(255))
+    
+class User(db.Model, UserMixin):
+    id = db.Column(db.Integer(), primary_key=True)
+    email = db.Column(db.String(), unique=True)
+    password = db.Column(db.String(255))
+    active = db.Column(db.Boolean())
+    fs_uniquifier = db.Column(db.String(255), unique=True, nullable=False)
+    roles = db.relationship(
+        "Role", secondary="roles_users", backref=db.backref("users", lazy="dynamic")
+    )
 
 
 """
@@ -16,7 +39,7 @@ db = SQLAlchemy()
 | `Coil → SaleCoil` | `coil.sales_used_in` |
 
 
-
+source 
 Model Relationships:
 
 | Model      | Purpose                                                     |
@@ -34,27 +57,15 @@ Model Relationships:
 # Purchase & Coil
 # ---------------------------
 
-class Purchase(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    date = db.Column(db.DateTime, default=datetime.utcnow)
-    supplier_name = db.Column(db.String)
-    total_weight = db.Column(db.Float)
-    total_cost = db.Column(db.Float)
-
 
 class Coil(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    coil_number = db.Column(db.String, unique=True, nullable=False)
-    weight = db.Column(db.Float)
-    length = db.Column(db.Float)
-
-    purchase_id = db.Column(db.Integer, db.ForeignKey('purchase.id'))
-    purchase = db.relationship('Purchase', backref=db.backref('coils', lazy='dynamic'))
-
-
-# ---------------------------
-# Customer & Product
-# ---------------------------
+    coil_number = db.Column(db.String, nullable=False)
+    supplier_name = db.Column(db.String)
+    total_weight = db.Column(db.Float)
+    purchase_price = db.Column(db.Float)
+    purchase_date = db.Column(db.DateTime, default=datetime.now)
+    
 
 class Party(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -76,7 +87,7 @@ class Product(db.Model):
 
 class Sale(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    date = db.Column(db.DateTime, default=datetime.utcnow)
+    date = db.Column(db.DateTime, default=datetime.now)
 
     party_id = db.Column(db.Integer, db.ForeignKey('party.id'), nullable=False)
     product_id = db.Column(db.Integer, db.ForeignKey('product.id'), nullable=False)
@@ -115,7 +126,7 @@ class SaleCoil(db.Model):
     id = db.Column(db.Integer, primary_key=True)
 
     sale_id = db.Column(db.Integer, db.ForeignKey('sale.id'), nullable=False)
-    coil_id = db.Column(db.Integer, db.ForeignKey('coil.id'), nullable=False)
+    coil_number = db.Column(db.Integer, db.ForeignKey('coil.coil_number'), nullable=False)
 
     sale = db.relationship('Sale', backref=db.backref('used_coils', lazy='dynamic'))
     coil = db.relationship('Coil', backref=db.backref('sales_used_in', lazy='dynamic'))
