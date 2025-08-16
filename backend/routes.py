@@ -460,3 +460,127 @@ def all_orders():
         results.append(sale_data)
 
     return jsonify(results)
+
+
+@app.route("/api/customer/search", methods=["GET"])
+def search_customer():
+    name_query = request.args.get("name", "").strip()
+    if not name_query:
+        return jsonify([]), 200
+
+    # case-insensitive search
+    matches = Party.query.filter(Party.name.ilike(f"%{name_query}%")).all()
+
+    results = [
+        {"id": c.id, "name": c.name, "phone": c.phone}
+        for c in matches
+    ]
+    return jsonify(results), 200
+
+
+
+
+# ---------------------------
+# 1. Search Customers (by name / phone)
+# ---------------------------
+@app.route("/api/customers/search")
+def search_customers():
+    query = request.args.get("query", "").strip()
+    if not query:
+        return jsonify({"error": "Query is required"}), 400
+
+    customers = Party.query.filter(
+        (Party.name.ilike(f"%{query}%")) | 
+        (Party.phone.ilike(f"%{query}%"))
+    ).all()
+
+    results = []
+    for c in customers:
+        # also fetch sale orders for each customer
+        orders = Sale.query.filter_by(customer_id=c.id).all()
+        results.append({
+            "id": c.id,
+            "name": c.name,
+            "phone": c.phone,
+            "orders": [
+                {
+                    "id": o.id,
+                    "sale_date": o.sale_date,
+                    "total": o.total_amount
+                } for o in orders
+            ]
+        })
+    return jsonify(results)
+
+
+# ---------------------------
+# 2. Search Sales by Product (make, type, color, coil)
+# ---------------------------
+@app.route("/api/sales/search/products")
+def search_sales_by_products():
+    query = request.args.get("query", "").strip()
+    if not query:
+        return jsonify({"error": "Query is required"}), 400
+
+    sales = (
+        db.session.query(SaleItem)
+        .join(Product, SaleItem.product_id == Product.id)
+        .filter(
+            (Product.make.ilike(f"%{query}%")) |
+            (Product.type.ilike(f"%{query}%")) |
+            (Product.color.ilike(f"%{query}%")) |
+            (Product.coil_name.ilike(f"%{query}%"))
+        )
+        .all()
+    )
+
+    results = [
+        {
+            "order_id": s.id,
+            "customer_id": s.customer_id,
+            "sale_date": s.sale_date,
+            "total": s.total_amount,
+            "product": {
+                "make": s.product.make,
+                "type": s.product.type,
+                "color": s.product.color,
+                "coil": s.product.coil_name
+            }
+        }
+        for s in sales
+    ]
+    return jsonify(results)
+
+
+# ---------------------------
+# 3. Search Sales by Date / Month / Year
+# ---------------------------
+@app.route("/api/sales/search/date")
+def search_sales_by_date():
+    search_type = request.args.get("type")   # date | month | year
+    query = request.args.get("query", "").strip()
+    if not search_type or not query:
+        return jsonify({"error": "type and query are required"}), 400
+
+    q = Sale.query
+    if search_type == "date":
+        q = q.filter(Sale.sale_date == query)
+    elif search_type == "month":
+        q = q.filter(db.extract("month", Sale.sale_date) == int(query))
+    elif search_type == "year":
+        q = q.filter(db.extract("year", Sale.sale_date) == int(query))
+    else:
+        return jsonify({"error": "Invalid search type"}), 400
+
+    sales = q.all()
+
+    results = [
+        {
+            "order_id": s.id,
+            "customer_id": s.customer_id,
+            "sale_date": s.date,
+            "total": s.total_amount
+        }
+        for s in sales
+    ]
+    return jsonify(results)

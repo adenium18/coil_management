@@ -6,10 +6,35 @@ export default {
     <!-- Party Name -->
     <div class="mb-3">
       <label class="form-label">Customer Name :</label>
-      <input class="form-control" v-model="partyName" placeholder="Enter party / customer name" />
+      <input class="form-control" v-model="partyName" @blur="checkCustomer" placeholder="Enter party / customer name" />
     </div>
 
-    <!-- Coil Groups -->
+    <!-- Customer Modal -->
+    <div v-if="showCustomerModal" class="modal fade show d-block" tabindex="-1">
+      <div class="modal-dialog">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title">Select Customer</h5>
+            <button type="button" class="close" @click="closeModal"> <span aria-hidden="true">&times;</span> </button>
+          </div>
+          <div class="modal-body">
+            <p>We found existing customers with the name <b>{{ partyName }}</b>. Please select:</p>
+            <ul class="list-group">
+              <li v-for="c in customerMatches" :key="c.id"
+                  class="list-group-item list-group-item-action"
+                  @click="selectCustomer(c)">
+                {{ c.name }} (ID: {{ c.id }})
+              </li>
+            </ul>
+            <div class="mt-3 text-center">
+              <button class="btn btn-outline-primary" @click="createNewCustomer">Create New Customer Anyway</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+       <!-- Coil Groups -->
     <div v-for="(group, gIdx) in coilGroups" :key="gIdx" class="border p-3 mb-4">
       <h5>Coil #{{ gIdx + 1 }}</h5>
 
@@ -117,6 +142,9 @@ export default {
   data() {
     return {
       partyName: "",
+      selectedCustomerId: null,   // store selected or new customer id
+      showCustomerModal: false,
+      customerMatches: [],
       products: [],
       coils: [],
       coilGroups: [
@@ -143,6 +171,45 @@ export default {
     formatNumber(v) {
       return Number(v || 0).toFixed(2);
     },
+
+    async checkCustomer() {
+      if (!this.partyName.trim()) return;
+
+      try {
+        const res = await fetch(`/api/customer/search?name=${encodeURIComponent(this.partyName)}`, {
+          headers: { "Authentication-Token": this.token }
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.length > 0) {
+            // Multiple matches → show modal
+            this.customerMatches = data;
+            this.showCustomerModal = true;
+          } else {
+            // No matches → mark as new customer
+            this.selectedCustomerId = null;
+          }
+        }
+      } catch (err) {
+        console.error("Customer check failed:", err);
+      }
+    },
+
+    selectCustomer(c) {
+      this.selectedCustomerId = c.id;
+      this.partyName = c.name;
+      this.showCustomerModal = false;
+    },
+
+    createNewCustomer() {
+      this.selectedCustomerId = null; // backend will create a new one
+      this.showCustomerModal = false;
+    },
+
+    closeModal() {
+      this.showCustomerModal = false;
+    },
+
     groupSubtotal(gIdx) {
       return this.groupSubtotalByGroup(this.coilGroups[gIdx]);
     },
@@ -210,6 +277,7 @@ export default {
     removeCoilGroup(gIdx) {
       this.coilGroups.splice(gIdx, 1);
     },
+
     async createSale() {
       if (!this.partyName.trim()) return alert("Please enter party name.");
       const validGroups = this.coilGroups.map(g => ({
@@ -218,13 +286,16 @@ export default {
         items: g.items.filter(i => i.length && i.quantity && i.length > 0 && i.quantity > 0),
         subtotal: this.groupSubtotalByGroup(g)
       })).filter(g => g.items.length > 0 && g.coil_id && g.product_id);
+
       if (!validGroups.length) return alert("Add at least one valid coil group with items.");
 
       const payload = {
         party_name: this.partyName.trim(),
+        customer_id: this.selectedCustomerId,   // ✅ send selected or null (for new)
         coils: validGroups,
         total_amount: Number(this.totalAmount)
       };
+
       try {
         this.isSubmitting = true;
         const res = await fetch("/api/sales", {
@@ -235,6 +306,7 @@ export default {
         if (res.ok) {
           alert("Sale created successfully!");
           this.partyName = "";
+          this.selectedCustomerId = null;
           this.coilGroups = [{
             selectedCoilId: "",
             filteredProducts: [],
@@ -251,6 +323,7 @@ export default {
       }
     }
   },
+
   async mounted() {
     await this.fetchData();
   }

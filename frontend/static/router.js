@@ -11,7 +11,8 @@ import UpdateProductForm from "./components/updateproductform.js";
 import CoilForm from "./components/coilform.js";
 import SaleOrder from "./components/view_sale_order.js";
 import UpdateCoilForm from "./components/updatecoilform.js";
-import Summary from "./components/summary.js";
+import SearchResults from "./components/searchresults.js";
+
 
 
 const routes = [
@@ -28,7 +29,8 @@ const routes = [
     { path:"/create-coil", component:CoilForm},
     { path:"/update-coil", component:UpdateCoilForm},
     { path:"/view_all_orders", component:SaleOrder},
-    { path:"/product-summary", component:Summary}
+    { path:"/search", component: SearchResults},
+    
 
 ];
 

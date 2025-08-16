@@ -1,67 +1,145 @@
 export default {
   name: "SaleOrders",
   template: `
-    <div class="sale-orders">
-      <h2>Sale Orders</h2>
+    <div>
+      <h2 class="text-center">📦 Sale Orders</h2>
 
-      <button @click="exportCSV" :disabled="exporting">
-        {{ exporting ? 'Exporting...' : 'Export CSV' }}
-      </button>
+      <!-- Filters -->
+      <div class="row mb-3">
+        <div class="col-md-3">
+          <input v-model="filters.query" class="form-control" placeholder="Search party, coil, make..." />
+        </div>
+        <div class="col-md-2">
+          <input v-model="filters.date" type="date" class="form-control" />
+        </div>
+        <div class="col-md-2">
+          <select v-model="filters.month" class="form-select">
+            <option value="">Month</option>
+            <option v-for="m in 12" :key="m" :value="m">{{ m }}</option>
+          </select>
+        </div>
+        <div class="col-md-2">
+          <input v-model="filters.year" type="number" class="form-control" placeholder="Year" />
+        </div>
+        <div class="col-md-3">
+          <button @click="applyFilters" class="btn btn-info">Apply Filters</button>
+          <button @click="clearFilters" class="btn btn-secondary ms-2">Reset</button>
+        </div>
+      </div>
 
-      <div v-if="loading">Loading...</div>
-      <div v-if="error" class="error">{{ error }}</div>
+      <!-- Buttons -->
+      <div class="text-center mb-3">
+        <button class="btn btn-outline-success me-2" @click="exportCSV" :disabled="exporting">
+          {{ exporting ? 'Exporting...' : 'Export CSV' }}
+        </button>
+        <button class="btn btn-outline-primary" @click="toggleView">
+          {{ showSummary ? 'Show Sale Orders' : 'Show Product Summary' }}
+        </button>
+      </div>
 
-      <table v-if="mergedSales.length && !loading" border="1" cellpadding="5">
-        <thead>
-          <tr>
-            <th>Sale ID</th>
-            <th>Date</th>
-            <th>Party Name</th>
-            <th>Phone</th>
-            <th>Coil Number</th>
-            <th>Make</th>
-            <th>Type</th>
-            <th>Color</th>
-            <th>Length</th>
-            <th>Rate</th>
-            <th>Amount</th>
-            <th>Total Amount</th>
-          </tr>
-        </thead>
-        <tbody>
-          <template v-for="(sale, index) in mergedSales" :key="'sale-' + index">
-            <tr v-for="(row, rowIndex) in sale.rows" :key="'row-' + rowIndex">
-              <td v-if="rowIndex === 0" :rowspan="sale.rows.length">{{ sale.saleId }}</td>
-              <td v-if="rowIndex === 0" :rowspan="sale.rows.length">{{ sale.date }}</td>
-              <td v-if="rowIndex === 0" :rowspan="sale.rows.length">{{ sale.partyName }}</td>
-              <td v-if="rowIndex === 0" :rowspan="sale.rows.length">{{ sale.partyPhone }}</td>
-              <td>{{ row.coilNumber }}</td>
-              <td>{{ row.make }}</td>
-              <td>{{ row.type }}</td>
-              <td>{{ row.color }}</td>
-              <td>{{ row.length }}</td>
-              <td>{{ row.rate }}</td>
-              <td>{{ row.amount }}</td>
-              <td v-if="rowIndex === 0" :rowspan="sale.rows.length">{{ sale.totalAmount }}</td>
+      <!-- Loading / Error -->
+      <div v-if="loading" class="text-center text-primary">Loading...</div>
+      <div v-if="error" class="text-center text-danger">{{ error }}</div>
+
+      <!-- Sales Orders Table -->
+      <div v-if="!showSummary && filteredSales.length && !loading" class="table-responsive">
+        <table class="table table-striped table-hover text-center">
+          <thead class="table-dark">
+            <tr>
+              <th>Sale ID</th>
+              <th>Date</th>
+              <th>Party Name</th>
+              <th>Phone</th>
+              <th>Coil Number</th>
+              <th>Make</th>
+              <th>Type</th>
+              <th>Color</th>
+              <th>Length</th>
+              <th>Rate</th>
+              <th>Amount</th>
+              <th>Total Amount</th>
             </tr>
-          </template>
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            <template v-for="(sale, index) in filteredSales" :key="'sale-' + index">
+              <tr v-for="(row, rowIndex) in sale.rows" :key="'row-' + rowIndex">
+                <td v-if="rowIndex === 0" :rowspan="sale.rows.length">{{ sale.saleId }}</td>
+                <td v-if="rowIndex === 0" :rowspan="sale.rows.length">{{ formatDate(sale.date) }}</td>
+                <td v-if="rowIndex === 0" :rowspan="sale.rows.length">{{ sale.partyName }}</td>
+                <td v-if="rowIndex === 0" :rowspan="sale.rows.length">{{ sale.partyPhone }}</td>
+                <td>{{ row.coilNumber }}</td>
+                <td>{{ row.make }}</td>
+                <td>{{ row.type }}</td>
+                <td>{{ row.color }}</td>
+                <td>{{ row.length }}</td>
+                <td>{{ row.rate }}</td>
+                <td>{{ row.amount }}</td>
+                <td v-if="rowIndex === 0" 
+                    :rowspan="sale.rows.length" 
+                    class="fw-bold text-white" 
+                    style="background-color:#198754;">
+                  {{ sale.totalAmount }}
+                </td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Product Summary Report -->
+      <div v-if="showSummary && !loading" class="table-responsive">
+        <h4 class="text-center">📊 Product Summary Report</h4>
+        <table class="table table-bordered table-hover text-center">
+          <thead class="table-dark">
+            <tr>
+              <th>Make</th>
+              <th>Type</th>
+              <th>Color</th>
+              <th>Total Quantity</th>
+              <th>Total Length</th>
+              <th>Average Rate</th>
+              <th>Total Amount</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="(summary, index) in productSummary" :key="'summary-' + index">
+              <td>{{ summary.make }}</td>
+              <td>{{ summary.type }}</td>
+              <td>{{ summary.color }}</td>
+              <td>{{ summary.totalQuantity }}</td>
+              <td>{{ summary.totalLength }}</td>
+              <td>{{ summary.avgRate.toFixed(2) }}</td>
+              <td class="fw-bold text-success">{{ summary.totalAmount }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>   
     </div>
+
+
+      <div v-else-if="!loading || !showSummary" class="text-center text-danger">
+        No sale orders available.
+      </div>
   `,
   data() {
     return {
       sales: [],
+      filters: {
+        query: "",
+        date: "",
+        month: "",
+        year: ""
+      },
       loading: true,
       error: null,
       exporting: false,
+      showSummary: false,
       token: localStorage.getItem("auth-token") || ""
     };
   },
   computed: {
     mergedSales() {
       if (!Array.isArray(this.sales)) return [];
-
       return this.sales.map(sale => {
         const coils = Array.isArray(sale.used_coils) ? sale.used_coils : [];
         let rows = [];
@@ -73,9 +151,9 @@ export default {
               make: coil.make || "",
               type: coil.type || "",
               color: coil.color || "",
-              length: item.length || "",
-              rate: item.rate || "",
-              amount: item.amount || ""
+              length: item.length || 0,
+              rate: item.rate || 0,
+              amount: item.amount || 0
             });
           });
         });
@@ -84,10 +162,69 @@ export default {
           date: sale.date || "",
           partyName: sale.party?.name || "",
           partyPhone: sale.party?.phone || "",
-          totalAmount: sale.total_amount || "",
+          totalAmount: sale.total_amount || 0,
           rows
         };
       });
+    },
+    filteredSales() {
+      return this.mergedSales.filter(sale => {
+        let match = true;
+        const dateObj = sale.date ? new Date(sale.date) : null;
+
+        if (this.filters.query) {
+          const q = this.filters.query.toLowerCase();
+          match = match && (
+            sale.partyName.toLowerCase().includes(q) ||
+            sale.partyPhone.toLowerCase().includes(q) ||
+            sale.rows.some(r =>
+              r.make.toLowerCase().includes(q) ||
+              r.type.toLowerCase().includes(q) ||
+              r.color.toLowerCase().includes(q) ||
+              r.coilNumber.toLowerCase().includes(q)
+            )
+          );
+        }
+        if (this.filters.date) {
+          match = match && (dateObj?.toISOString().slice(0,10) === this.filters.date);
+        }
+        if (this.filters.month) {
+          match = match && (dateObj?.getMonth() + 1 === Number(this.filters.month));
+        }
+        if (this.filters.year) {
+          match = match && (dateObj?.getFullYear() === Number(this.filters.year));
+        }
+        return match;
+      });
+    },
+    productSummary() {
+      let summaryMap = {};
+      this.filteredSales.forEach(sale => {
+        sale.rows.forEach(row => {
+          const key = `${row.make}-${row.type}-${row.color}`;
+          if (!summaryMap[key]) {
+            summaryMap[key] = {
+              make: row.make,
+              type: row.type,
+              color: row.color,
+              totalQuantity: 0,
+              totalLength: 0,
+              totalRate: 0,
+              count: 0,
+              totalAmount: 0
+            };
+          }
+          summaryMap[key].totalQuantity += 1;
+          summaryMap[key].totalLength += Number(row.length) || 0;
+          summaryMap[key].totalRate += Number(row.rate) || 0;
+          summaryMap[key].totalAmount += Number(row.amount) || 0;
+          summaryMap[key].count += 1;
+        });
+      });
+      return Object.values(summaryMap).map(s => ({
+        ...s,
+        avgRate: s.count ? s.totalRate / s.count : 0
+      }));
     }
   },
   methods: {
@@ -95,13 +232,9 @@ export default {
       try {
         const res = await fetch("/api/all_orders", {
           method: "GET",
-          headers: {
-            "Authentication-Token": this.token
-          }
+          headers: { "Authentication-Token": this.token }
         });
-
         if (!res.ok) throw new Error("Failed to fetch sale orders");
-
         const data = await res.json();
         this.sales = Array.isArray(data) ? data : [];
       } catch (err) {
@@ -110,27 +243,25 @@ export default {
         this.loading = false;
       }
     },
+    toggleView() {
+      this.showSummary = !this.showSummary;
+    },
     async exportCSV() {
       try {
         this.exporting = true;
-        // Step 1: Trigger CSV generation task
         const res = await fetch("/api/generate_sale_orders_csv", {
           method: "POST",
-          headers: {
-            "Authentication-Token": this.token
-          }
+          headers: { "Authentication-Token": this.token }
         });
         if (!res.ok) throw new Error("Failed to start CSV export");
 
         const { task_id } = await res.json();
         if (!task_id) throw new Error("No task ID returned");
 
-        // Step 2: Poll for CSV ready
         let fileReady = false;
         while (!fileReady) {
           const pollRes = await fetch(`/get_csv/${task_id}`);
           if (pollRes.status === 200) {
-            // CSV is ready
             const blob = await pollRes.blob();
             const url = window.URL.createObjectURL(blob);
             const a = document.createElement("a");
@@ -142,7 +273,7 @@ export default {
             window.URL.revokeObjectURL(url);
             fileReady = true;
           } else {
-            await new Promise(r => setTimeout(r, 2000)); // wait 2 sec
+            await new Promise(r => setTimeout(r, 2000));
           }
         }
       } catch (err) {
@@ -150,6 +281,17 @@ export default {
       } finally {
         this.exporting = false;
       }
+    },
+    formatDate(dateStr) {
+      const date = new Date(dateStr);
+      return date.toLocaleDateString();
+    },
+    applyFilters() {
+      // Computed handles filtering, so just force reactivity
+      this.filters = { ...this.filters };
+    },
+    clearFilters() {
+      this.filters = { query: "", date: "", month: "", year: "" };
     }
   },
   mounted() {
