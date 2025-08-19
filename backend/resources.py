@@ -1,3 +1,5 @@
+import csv
+import io
 from socket import timeout
 from flask import current_app as app, jsonify, request
 from flask_restful import Resource, Api, reqparse, marshal, fields
@@ -313,6 +315,130 @@ class UpdateCustomer(Resource):
         party.phone = args.get("phone", party.phone)
         db.session.commit()
         return {"message": "Customer Updated"}
+    
+
+
+class AddOrdersAPI(Resource):
+    @auth_required("token")
+    @roles_required("admin")
+    def post(self):
+        try:
+            data = request.json  # should be a list of orders
+            if not isinstance(data, list):
+                return {"error": "Orders must be a list"}, 400
+
+            saved_orders = []
+
+            for order in data:
+                # 1. Check customer
+                customer = Party.query.filter_by(phone=order["customer"]["phone"]).first()
+                if not customer:
+                    customer = Party(name=order["customer"]["name"], phone=order["customer"]["phone"])
+                    db.session.add(customer)
+                    db.session.flush()
+
+                # 2. Create sale
+                sale = Sale(
+                    date=datetime.strptime(order.get("date"), "%Y-%m-%d %H:%M:%S") if order.get("date") else datetime.utcnow(),
+                    party_id=customer.id,
+                    total_amount=order["total_amount"]
+                )
+                db.session.add(sale)
+                db.session.flush()
+
+                # 3. Add items
+                for item in order.get("items", []):
+                    product = Product.query.get(item.get("product_id"))
+                    sale_item = SaleItem(
+                        sale_id=sale.id,
+                        product_id=product.id if product else None,
+                        length=item.get("length"),
+                        quantity=item.get("quantity"),
+                        rate=item.get("rate"),
+                        amount=item.get("amount"),
+                        is_custom=item.get("is_custom", False)
+                    )
+                    db.session.add(sale_item)
+
+                # 4. Add coils
+                for coil in order.get("coils", []):
+                    sale_coil = SaleCoil(
+                        sale_id=sale.id,
+                        coil_id=coil.get("coil_id"),
+                        weight=coil.get("weight")
+                    )
+                    db.session.add(sale_coil)
+
+                saved_orders.append({"sale_id": sale.id, "customer": customer.name})
+
+            db.session.commit()
+            return {"message": "Orders imported successfully", "orders": saved_orders}, 201
+
+        except Exception as e:
+            db.session.rollback()
+            return {"error": str(e)}, 400
+
+
+class ImportOrdersAPI(Resource):
+    @auth_required("token")
+    @roles_required("admin")
+    def post(self):
+        try:
+            if "file" not in request.files:
+                return {"error": "No file uploaded"}, 400
+
+            file = request.files["file"]
+            if file.filename == "":
+                return {"error": "Empty file name"}, 400
+
+            stream = io.StringIO(file.stream.read().decode("UTF8"), newline=None)
+            reader = csv.DictReader(stream)
+
+            saved_orders = []
+
+            for row in reader:
+                # Expected columns: customer_name, customer_phone, date, total_amount, product_id, quantity, rate, amount, coil_id, weight
+                customer = Party.query.filter_by(phone=row["customer_phone"]).first()
+                if not customer:
+                    customer = Party(name=row["customer_name"], phone=row["customer_phone"])
+                    db.session.add(customer)
+                    db.session.flush()
+
+                sale = Sale(
+                    date=datetime.strptime(row.get("date"), "%Y-%m-%d %H:%M:%S") if row.get("date") else datetime.utcnow(),
+                    party_id=customer.id,
+                    total_amount=float(row["total_amount"])
+                )
+                db.session.add(sale)
+                db.session.flush()
+
+                sale_item = SaleItem(
+                    sale_id=sale.id,
+                    product_id=int(row["product_id"]) if row.get("product_id") else None,
+                    quantity=int(row["quantity"]) if row.get("quantity") else 1,
+                    rate=float(row["rate"]) if row.get("rate") else 0,
+                    amount=float(row["amount"]) if row.get("amount") else 0,
+                    is_custom=False
+                )
+                db.session.add(sale_item)
+
+                if row.get("coil_id"):
+                    sale_coil = SaleCoil(
+                        sale_id=sale.id,
+                        coil_id=int(row["coil_id"]),
+                        weight=float(row["weight"]) if row.get("weight") else None
+                    )
+                    db.session.add(sale_coil)
+
+                saved_orders.append({"sale_id": sale.id, "customer": customer.name})
+
+            db.session.commit()
+            return {"message": "CSV imported successfully", "orders": saved_orders}, 201
+
+        except Exception as e:
+            db.session.rollback()
+            return {"error": str(e)}, 400
+
 
 api.add_resource(ProductsAPI, "/products")
 api.add_resource(UpdateProuct, "/update/product/<int:id>")
@@ -321,3 +447,5 @@ api.add_resource(UpdateCoil, "/update/coil/<int:id>")
 api.add_resource(SaleAPI, "/sales")
 api.add_resource(CustomerAPI, "/customers")
 api.add_resource(UpdateCustomer,"/update/customer/<int:id>")
+api.add_resource(AddOrdersAPI, "/add_orders")
+api.add_resource(ImportOrdersAPI, "/import_orders")

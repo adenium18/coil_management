@@ -32,8 +32,13 @@ export default {
         <button class="btn btn-outline-success me-2" @click="exportCSV" :disabled="exporting">
           {{ exporting ? 'Exporting...' : 'Export CSV' }}
         </button>
-        <button class="btn btn-outline-primary" @click="toggleView">
+        <button class="btn btn-outline-primary me-2" @click="toggleView">
           {{ showSummary ? 'Show Sale Orders' : 'Show Product Summary' }}
+        </button>
+        <!-- CSV Import -->
+        <input type="file" accept=".csv" @change="importCSV" ref="fileInput" class="d-none" />
+        <button class="btn btn-outline-warning" @click="$refs.fileInput.click()">
+          Import CSV
         </button>
       </div>
 
@@ -114,12 +119,11 @@ export default {
           </tbody>
         </table>
       </div>   
-    </div>
-
 
       <div v-else-if="!loading || !showSummary" class="text-center text-danger">
         No sale orders available.
       </div>
+    </div>
   `,
   data() {
     return {
@@ -138,6 +142,7 @@ export default {
     };
   },
   computed: {
+    /* same computed props as your version (mergedSales, filteredSales, productSummary) */
     mergedSales() {
       if (!Array.isArray(this.sales)) return [];
       return this.sales.map(sale => {
@@ -246,48 +251,121 @@ export default {
     toggleView() {
       this.showSummary = !this.showSummary;
     },
-    async exportCSV() {
+    exportCSV() {
       try {
         this.exporting = true;
-        const res = await fetch("/api/generate_sale_orders_csv", {
-          method: "POST",
-          headers: { "Authentication-Token": this.token }
-        });
-        if (!res.ok) throw new Error("Failed to start CSV export");
 
-        const { task_id } = await res.json();
-        if (!task_id) throw new Error("No task ID returned");
-
-        let fileReady = false;
-        while (!fileReady) {
-          const pollRes = await fetch(`/get_csv/${task_id}`);
-          if (pollRes.status === 200) {
-            const blob = await pollRes.blob();
-            const url = window.URL.createObjectURL(blob);
-            const a = document.createElement("a");
-            a.href = url;
-            a.download = "sale_orders.csv";
-            document.body.appendChild(a);
-            a.click();
-            a.remove();
-            window.URL.revokeObjectURL(url);
-            fileReady = true;
-          } else {
-            await new Promise(r => setTimeout(r, 2000));
-          }
+        let rows = [];
+        if (this.showSummary) {
+          rows.push(["Make", "Type", "Color", "Total Quantity", "Total Length", "Average Rate", "Total Amount"]);
+          this.productSummary.forEach(s => {
+            rows.push([
+              s.make, s.type, s.color,
+              s.totalQuantity, s.totalLength,
+              s.avgRate.toFixed(2), s.totalAmount
+            ]);
+          });
+        } else {
+          rows.push(["Sale ID","Date","Party Name","Phone","Coil Number","Make","Type","Color","Length","Rate","Amount","Total Amount"]);
+          this.filteredSales.forEach(sale => {
+            sale.rows.forEach((r, idx) => {
+              rows.push([
+                idx === 0 ? sale.saleId : "",
+                idx === 0 ? this.formatDate(sale.date) : "",
+                idx === 0 ? sale.partyName : "",
+                idx === 0 ? sale.partyPhone : "",
+                r.coilNumber, r.make, r.type, r.color,
+                r.length, r.rate, r.amount,
+                idx === 0 ? sale.totalAmount : ""
+              ]);
+            });
+          });
         }
+
+        const csvContent = rows.map(r => r.map(v => `"${v}"`).join(",")).join("\n");
+        const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = this.showSummary ? "product_summary.csv" : "sale_orders.csv";
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        window.URL.revokeObjectURL(url);
       } catch (err) {
         alert(err.message);
       } finally {
         this.exporting = false;
       }
     },
+importCSV(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+
+  const reader = new FileReader();
+  reader.onload = async e => {
+    const text = e.target.result;
+    const rows = text.split("\n").map(r => r.split(",").map(v => v.replace(/"/g, "")));
+    const headers = rows[0];
+    const dataRows = rows.slice(1);
+
+    let imported = [];
+    dataRows.forEach(row => {
+      if (row.length < 12) return;
+      imported.push({
+        sale_id: row[0],
+        date: row[1],
+        party: { name: row[2], phone: row[3] },
+        used_coils: [{
+          coil_number: row[4],
+          make: row[5],
+          type: row[6],
+          color: row[7],
+          items: [{
+            length: Number(row[8]),
+            rate: Number(row[9]),
+            amount: Number(row[10])
+          }]
+        }],
+        total_amount: Number(row[11]) || 0
+      });
+    });
+
+    if (!imported.length) {
+      alert("❌ No valid rows found in CSV.");
+      return;
+    }
+
+    try {
+      // 🔹 Send imported data to backend
+      const res = await fetch("/api/add_orders", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authentication-Token": this.token
+        },
+        body: JSON.stringify(imported)   // send as array
+      });
+
+      if (!res.ok) throw new Error("Failed to save orders to backend");
+
+      const saved = await res.json();
+
+      // 🔹 Update frontend state only if backend save succeeded
+      this.sales = [...this.sales, ...saved];
+      alert("✅ CSV Imported & Saved to Database!");
+    } catch (err) {
+      alert("⚠️ Import failed: " + err.message);
+    }
+  };
+  reader.readAsText(file);
+}
+,
     formatDate(dateStr) {
       const date = new Date(dateStr);
       return date.toLocaleDateString();
     },
     applyFilters() {
-      // Computed handles filtering, so just force reactivity
       this.filters = { ...this.filters };
     },
     clearFilters() {

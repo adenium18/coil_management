@@ -7,7 +7,7 @@ from flask_restful import marshal, fields
 import flask_excel as excel
 from celery.result import AsyncResult
 from sqlalchemy.orm import joinedload
-from backend.celery.tasks import create_csv
+import io
 
 from backend.models import SaleCoil, SaleItem, User,db,Coil, Party, Sale, Product
 
@@ -34,25 +34,7 @@ def getData(id):
     else:
         return  {'message':'task not ready'},405
     
-
-@app.get('/create_csv')
-def createCSV():
-    task=create_csv.delay(2)
-    return {'task_id': task.id},200
-
-
-@app.get('/get_csv/<id>')
-def getCSV(id):
-    result= AsyncResult(id)
-
-    if result.ready():
-        return send_file(f'./backend/celery/user_downloads/{result.result}')
-    else:
-        return {'message':'task not ready'},405
-    
-
-
-    
+   
 @app.get("/")
 def home():
     return render_template("index.html")
@@ -584,3 +566,159 @@ def search_sales_by_date():
         for s in sales
     ]
     return jsonify(results)
+
+
+@app.route("/api/import_orders", methods=["POST"])
+@auth_required("token")
+def import_orders():
+    if "file" not in request.files:
+        return jsonify({"error": "No file uploaded"}), 400
+
+    file = request.files["file"]
+    if not file.filename.endswith(".csv"):
+        return jsonify({"error": "Invalid file format"}), 400
+
+    stream = io.StringIO(file.stream.read().decode("utf-8"))
+    reader = csv.DictReader(stream)
+
+    imported = 0
+    skipped_customers = []
+    created_customers = []
+
+    for row in reader:
+        try:
+            # 1️⃣ Check/Create Customer
+            party_name = row.get("Party Name")
+            party_phone = row.get("Phone")
+
+            customer = Party.query.filter_by(phone=party_phone).first()
+            if not customer:
+                customer = Party(
+                    name=party_name,
+                    phone=party_phone
+                )
+                db.session.add(customer)
+                created_customers.append(party_name)
+
+            # 2️⃣ Create Sale Order
+            sale = Sale(
+                sale_id=row.get("Sale ID"),
+                date=row.get("Date"),
+                total_amount=float(row.get("Total Amount") or 0),
+                customer=customer
+            )
+            db.session.add(sale)
+
+            # 3️⃣ Add Coil/Product Entry
+            coil = Coil(
+                coil_number=row.get("Coil Number"),
+                make=row.get("Make"),
+                type=row.get("Type"),
+                color=row.get("Color"),
+                length=float(row.get("Length") or 0),
+                rate=float(row.get("Rate") or 0),
+                amount=float(row.get("Amount") or 0),
+                sale_order=sale
+            )
+            db.session.add(coil)
+
+            # 4️⃣ Update Product/Stock (if such a table exists)
+            product = Product.query.filter_by(
+                make=row.get("Make"),
+                type=row.get("Type"),
+                color=row.get("Color")
+            ).first()
+
+            if not product:
+                product = Product(
+                    make=row.get("Make"),
+                    type=row.get("Type"),
+                    color=row.get("Color"),
+                    total_quantity=0,
+                    total_length=0
+                )
+                db.session.add(product)
+
+            # update stock
+            product.total_quantity += 1
+            product.total_length += float(row.get("Length") or 0)
+
+            imported += 1
+
+        except Exception as e:
+            db.session.rollback()
+            return jsonify({"error": str(e)}), 500
+
+    db.session.commit()
+    return jsonify({
+        "message": f"Imported {imported} rows successfully",
+        "new_customers": created_customers,
+    })
+
+
+@app.route("/api/add_orders", methods=["POST"])
+def add_orders():
+    try:
+        data = request.get_json()  # array of orders
+        saved_orders = []
+
+        for order in data:
+            # 1. Handle Customer
+            party_name = order.get("party", {}).get("name")
+            party_phone = order.get("party", {}).get("phone")
+            
+            customer = Party.query.filter_by(name=party_name, phone=party_phone).first()
+            if not customer:
+                # If name same but phone different → create new customer
+                customer = Party(name=party_name, phone=party_phone)
+                db.session.add(customer)
+                db.session.flush()  # get id immediately
+
+            # 2. Create SaleOrder
+            sale_order = Sale(
+                sale_id = order.get("sale_id"),
+                date = datetime.strptime(order.get("date"), "%Y-%m-%d"),
+                customer_id = customer.id,
+                total_amount = order.get("total_amount", 0)
+            )
+            db.session.add(sale_order)
+            db.session.flush()
+
+            # 3. Handle Coils + Items
+            for coil in order.get("used_coils", []):
+                db_coil = Coil.query.filter_by(coil_number=coil.get("coil_number")).first()
+                if not db_coil:
+                    db_coil = Coil(
+                        coil_number = coil.get("coil_number"),
+                        make = coil.get("make"),
+                        type = coil.get("type"),
+                        color = coil.get("color")
+                    )
+                    db.session.add(db_coil)
+                    db.session.flush()
+
+                for item in coil.get("items", []):
+                    sale_item = SaleItem(
+                        sale_order_id = sale_order.id,
+                        coil_id = db_coil.id,
+                        length = item.get("length"),
+                        rate = item.get("rate"),
+                        amount = item.get("amount")
+                    )
+                    db.session.add(sale_item)
+
+            # Collect saved data to return
+            saved_orders.append({
+                "sale_id": sale_order.sale_id,
+                "date": str(sale_order.date),
+                "partyName": customer.name,
+                "partyPhone": customer.phone,
+                "total_amount": sale_order.total_amount
+            })
+
+        db.session.commit()
+        return jsonify(saved_orders), 201
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 400
