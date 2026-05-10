@@ -1,378 +1,510 @@
 export default {
   name: "SaleOrders",
   template: `
-    <div>
-      <h2 class="text-center">📦 Sale Orders</h2>
-
-      <!-- Filters -->
-      <div class="row mb-3">
-        <div class="col-md-3">
-          <input v-model="filters.query" class="form-control" placeholder="Search party, coil, make..." />
-        </div>
-        <div class="col-md-2">
-          <input v-model="filters.date" type="date" class="form-control" />
-        </div>
-        <div class="col-md-2">
-          <select v-model="filters.month" class="form-select">
-            <option value="">Month</option>
-            <option v-for="m in 12" :key="m" :value="m">{{ m }}</option>
-          </select>
-        </div>
-        <div class="col-md-2">
-          <input v-model="filters.year" type="number" class="form-control" placeholder="Year" />
-        </div>
-        <div class="col-md-3">
-          <button @click="applyFilters" class="btn btn-info">Apply Filters</button>
-          <button @click="clearFilters" class="btn btn-secondary ms-2">Reset</button>
-        </div>
+  <div class="page-wrapper">
+    <div class="page-header">
+      <div>
+        <h1 class="page-title">Sale Orders</h1>
+        <p class="page-sub">{{ filteredSales.length }} order{{ filteredSales.length !== 1 ? 's' : '' }} shown</p>
       </div>
-
-      <!-- Buttons -->
-      <div class="text-center mb-3">
-        <button class="btn btn-outline-success me-2" @click="exportCSV" :disabled="exporting">
-          {{ exporting ? 'Exporting...' : 'Export CSV' }}
+      <div class="d-flex gap-2 flex-wrap">
+        <button class="btn btn-outline-success btn-sm" @click="exportCSV" :disabled="exporting">
+          <i class="bi bi-download me-1"></i>{{ exporting ? 'Exporting…' : 'Export CSV' }}
         </button>
-        <button class="btn btn-outline-primary me-2" @click="toggleView">
-          {{ showSummary ? 'Show Sale Orders' : 'Show Product Summary' }}
+        <button class="btn btn-outline-primary btn-sm" @click="showSummary = !showSummary">
+          <i class="bi" :class="showSummary ? 'bi-list-ul' : 'bi-bar-chart-line'"></i>
+          {{ showSummary ? 'Show Orders' : 'Summary' }}
         </button>
-        <!-- CSV Import -->
         <input type="file" accept=".csv" @change="importCSV" ref="fileInput" class="d-none" />
-        <button class="btn btn-outline-warning" @click="$refs.fileInput.click()">
-          Import CSV
+        <button class="btn btn-outline-secondary btn-sm" @click="$refs.fileInput.click()">
+          <i class="bi bi-upload me-1"></i>Import CSV
         </button>
       </div>
+    </div>
 
-      <!-- Loading / Error -->
-      <div v-if="loading" class="text-center text-primary">Loading...</div>
-      <div v-if="error" class="text-center text-danger">{{ error }}</div>
+    <!-- Filters -->
+    <div class="card mb-3">
+      <div class="card-body py-3">
+        <div class="row g-2 align-items-end">
+          <div class="col-md-4">
+            <div class="input-group input-group-sm">
+              <span class="input-group-text"><i class="bi bi-search"></i></span>
+              <input v-model="filters.query" class="form-control" placeholder="Party, coil, make, color…" />
+            </div>
+          </div>
+          <div class="col-md-2">
+            <input v-model="filters.date" type="date" class="form-control form-control-sm"
+                   title="Filter by date" />
+          </div>
+          <div class="col-md-2">
+            <select v-model="filters.month" class="form-select form-select-sm">
+              <option value="">All months</option>
+              <option v-for="m in 12" :key="m" :value="m">{{ monthName(m) }}</option>
+            </select>
+          </div>
+          <div class="col-md-2">
+            <input v-model.number="filters.year" type="number" class="form-control form-control-sm"
+                   placeholder="Year" />
+          </div>
+          <div class="col-md-2">
+            <select v-model="filters.payStatus" class="form-select form-select-sm">
+              <option value="">All payments</option>
+              <option value="pending">Pending</option>
+              <option value="partial">Partial</option>
+              <option value="paid">Paid</option>
+            </select>
+          </div>
+          <div class="col-md-2">
+            <select v-model="filters.prodStatus" class="form-select form-select-sm">
+              <option value="">All production</option>
+              <option value="pending">Pending</option>
+              <option value="in_progress">In Progress</option>
+              <option value="completed">Completed</option>
+            </select>
+          </div>
+        </div>
+        <div class="d-flex justify-content-end gap-2 mt-2">
+          <button @click="fetchSales" class="btn btn-primary btn-sm">
+            <i class="bi bi-funnel me-1"></i>Apply
+          </button>
+          <button @click="clearFilters" class="btn btn-outline-secondary btn-sm">Reset</button>
+        </div>
+      </div>
+    </div>
 
-      <!-- Sales Orders Table -->
-      <div v-if="!showSummary && filteredSales.length && !loading" class="table-responsive">
-        <table class="table table-striped table-hover text-center">
-          <thead class="table-dark">
+    <!-- Loading -->
+    <div v-if="loading" class="d-flex justify-content-center py-5">
+      <div class="spinner-border text-primary"></div>
+    </div>
+    <div v-else-if="error" class="alert alert-danger">{{ error }}</div>
+
+    <!-- ── Orders Table ── -->
+    <div v-if="!showSummary && !loading && !error" class="card">
+      <div class="table-responsive">
+        <table class="table table-hover mb-0">
+          <thead class="table-head-accent">
             <tr>
-              <th>Sale ID</th>
+              <th>Invoice</th>
               <th>Date</th>
-              <th>Party Name</th>
-              <th>Phone</th>
-              <th>Coil Number</th>
-              <th>Make</th>
-              <th>Type</th>
-              <th>Color</th>
-              <th>Length</th>
-              <th>Rate</th>
-              <th>Amount</th>
-              <th>Total Amount</th>
+              <th>Customer</th>
+              <th>Coil</th>
+              <th>Product</th>
+              <th class="text-center">Len × Qty</th>
+              <th class="text-end">Amount</th>
+              <th class="text-end">Total</th>
+              <th class="text-center">Payment</th>
+              <th class="text-center">Production</th>
+              <th class="text-center">Actions</th>
             </tr>
           </thead>
           <tbody>
-            <template v-for="(sale, index) in filteredSales" :key="'sale-' + index">
-              <tr v-for="(row, rowIndex) in sale.rows" :key="'row-' + rowIndex">
-                <td v-if="rowIndex === 0" :rowspan="sale.rows.length">{{ sale.saleId }}</td>
-                <td v-if="rowIndex === 0" :rowspan="sale.rows.length">{{ formatDate(sale.date) }}</td>
-                <td v-if="rowIndex === 0" :rowspan="sale.rows.length">{{ sale.partyName }}</td>
-                <td v-if="rowIndex === 0" :rowspan="sale.rows.length">{{ sale.partyPhone }}</td>
-                <td>{{ row.coilNumber }}</td>
-                <td>{{ row.make }}</td>
-                <td>{{ row.type }}</td>
-                <td>{{ row.color }}</td>
-                <td>{{ row.length }}</td>
-                <td>{{ row.rate }}</td>
-                <td>{{ row.amount }}</td>
-                <td v-if="rowIndex === 0" 
-                    :rowspan="sale.rows.length" 
-                    class="fw-bold text-white" 
-                    style="background-color:#198754;">
-                  {{ sale.totalAmount }}
+            <tr v-if="!filteredSales.length">
+              <td colspan="11" class="text-center text-muted py-5">
+                <i class="bi bi-receipt display-4 d-block mb-2"></i>No orders found.
+              </td>
+            </tr>
+            <template v-for="(sale, si) in filteredSales" :key="'s-' + sale.saleId">
+              <!-- rows with items -->
+              <template v-if="sale.rows.length">
+                <tr v-for="(row, ri) in sale.rows" :key="'r-' + ri"
+                    :class="{ 'sale-row-cancelled': sale.status === 'cancelled' }">
+                  <td v-if="ri === 0" :rowspan="sale.rows.length" class="fw-semibold text-primary align-middle">
+                    {{ sale.invoiceNumber || ('INV-' + String(sale.saleId).padStart(4,'0')) }}
+                  </td>
+                  <td v-if="ri === 0" :rowspan="sale.rows.length" class="align-middle text-muted" style="white-space:nowrap;">
+                    {{ formatDate(sale.date) }}
+                  </td>
+                  <td v-if="ri === 0" :rowspan="sale.rows.length" class="align-middle fw-semibold">
+                    {{ sale.partyName }}
+                    <div class="text-muted" style="font-size:11px;">{{ sale.partyPhone }}</div>
+                  </td>
+                  <td>{{ row.coilNumber }}</td>
+                  <td><span class="badge bg-light text-dark border">{{ row.make }} {{ row.type }} {{ row.color }}</span></td>
+                  <td class="text-center">{{ row.length }} × {{ row.quantity }}</td>
+                  <td class="text-end">₹{{ Number(row.amount).toLocaleString('en-IN') }}</td>
+                  <td v-if="ri === 0" :rowspan="sale.rows.length"
+                      class="text-end fw-bold align-middle text-success">
+                    ₹{{ Number(sale.totalAmount).toLocaleString('en-IN') }}
+                  </td>
+                  <td v-if="ri === 0" :rowspan="sale.rows.length" class="text-center align-middle">
+                    <span class="badge d-block mb-1" :class="payBadge(sale.paymentStatus)">
+                      {{ capitalize(sale.paymentStatus) }}
+                    </span>
+                    <span class="badge" :class="statusBadge(sale.status)">
+                      {{ capitalize(sale.status) }}
+                    </span>
+                  </td>
+                  <td v-if="ri === 0" :rowspan="sale.rows.length" class="text-center align-middle">
+                    <span class="badge d-block mb-1" :class="prodBadge(sale.productionStatus)">
+                      {{ prodLabel(sale.productionStatus) }}
+                    </span>
+                    <select class="form-select form-select-sm mt-1" style="font-size:11px;min-width:110px;"
+                            :value="sale.productionStatus"
+                            @change="updateProductionStatus(sale.saleId, $event.target.value)">
+                      <option value="pending">Pending</option>
+                      <option value="in_progress">In Progress</option>
+                      <option value="completed">Completed</option>
+                    </select>
+                  </td>
+                  <td v-if="ri === 0" :rowspan="sale.rows.length" class="text-center align-middle">
+                    <div class="d-flex gap-1 justify-content-center">
+                      <router-link :to="'/invoice/' + sale.saleId"
+                                   class="btn btn-sm btn-outline-primary" title="View Invoice">
+                        <i class="bi bi-receipt"></i>
+                      </router-link>
+                      <button class="btn btn-sm btn-outline-success" title="Mark Paid"
+                              @click="markPaid(sale)" :disabled="sale.paymentStatus === 'paid'">
+                        <i class="bi bi-cash-coin"></i>
+                      </button>
+                      <button class="btn btn-sm btn-outline-danger" title="Delete"
+                              @click="deleteSale(sale.saleId)">
+                        <i class="bi bi-trash"></i>
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              </template>
+              <!-- sale with no items -->
+              <tr v-else>
+                <td class="fw-semibold text-primary">
+                  {{ sale.invoiceNumber || ('INV-' + String(sale.saleId).padStart(4,'0')) }}
+                </td>
+                <td class="text-muted">{{ formatDate(sale.date) }}</td>
+                <td class="fw-semibold">{{ sale.partyName }}</td>
+                <td colspan="4" class="text-muted fst-italic">No items recorded</td>
+                <td class="text-end fw-bold text-success">
+                  ₹{{ Number(sale.totalAmount).toLocaleString('en-IN') }}
+                </td>
+                <td class="text-center">
+                  <span class="badge" :class="payBadge(sale.paymentStatus)">
+                    {{ capitalize(sale.paymentStatus) }}
+                  </span>
+                </td>
+                <td class="text-center">
+                  <span class="badge d-block mb-1" :class="prodBadge(sale.productionStatus)">
+                    {{ prodLabel(sale.productionStatus) }}
+                  </span>
+                </td>
+                <td class="text-center">
+                  <router-link :to="'/invoice/' + sale.saleId"
+                               class="btn btn-sm btn-outline-primary">
+                    <i class="bi bi-receipt"></i>
+                  </router-link>
                 </td>
               </tr>
             </template>
           </tbody>
         </table>
       </div>
+    </div>
 
-      <!-- Product Summary Report -->
-      <div v-if="showSummary && !loading" class="table-responsive">
-        <h4 class="text-center">📊 Product Summary Report</h4>
-        <table class="table table-bordered table-hover text-center">
-          <thead class="table-dark">
+    <!-- ── Product Summary ── -->
+    <div v-if="showSummary && !loading" class="card">
+      <div class="card-header">
+        <h5 class="mb-0"><i class="bi bi-bar-chart-line me-2 text-primary"></i>Product Summary</h5>
+      </div>
+      <div class="table-responsive">
+        <table class="table mb-0">
+          <thead class="table-head-accent">
             <tr>
-              <th>Make</th>
-              <th>Type</th>
-              <th>Color</th>
-              <th>Total Quantity</th>
-              <th>Total Length</th>
-              <th>Average Rate</th>
-              <th>Total Amount</th>
+              <th>Make</th><th>Type</th><th>Color</th>
+              <th class="text-center">Total Qty</th>
+              <th class="text-end">Total Length</th>
+              <th class="text-end">Avg Rate</th>
+              <th class="text-end">Total Amount</th>
             </tr>
           </thead>
           <tbody>
-            <tr v-for="(summary, index) in productSummary" :key="'summary-' + index">
-              <td>{{ summary.make }}</td>
-              <td>{{ summary.type }}</td>
-              <td>{{ summary.color }}</td>
-              <td>{{ summary.totalQuantity }}</td>
-              <td>{{ summary.totalLength }}</td>
-              <td>{{ summary.avgRate.toFixed(2) }}</td>
-              <td class="fw-bold text-success">{{ summary.totalAmount }}</td>
+            <tr v-if="!productSummary.length">
+              <td colspan="7" class="text-center text-muted py-4">No data for selected filters.</td>
+            </tr>
+            <tr v-for="(s, i) in productSummary" :key="'ps-' + i">
+              <td>{{ s.make }}</td><td>{{ s.type }}</td><td>{{ s.color }}</td>
+              <td class="text-center">{{ s.totalQuantity }}</td>
+              <td class="text-end">{{ s.totalLength.toFixed(2) }} m</td>
+              <td class="text-end">₹{{ s.avgRate.toFixed(2) }}</td>
+              <td class="text-end fw-bold text-success">
+                ₹{{ Number(s.totalAmount).toLocaleString('en-IN') }}
+              </td>
             </tr>
           </tbody>
         </table>
-      </div>   
-
-      <div v-else-if="!loading || !showSummary" class="text-center text-danger">
-        No sale orders available.
       </div>
     </div>
+
+    <!-- Payment modal -->
+    <div v-if="paymentModal.show" class="modal-backdrop-custom" @click.self="paymentModal.show=false">
+      <div class="modal-card" style="max-width:380px;">
+        <div class="modal-card__header">
+          <h5 class="mb-0"><i class="bi bi-cash-coin me-2 text-success"></i>Record Payment</h5>
+          <button class="btn-close" @click="paymentModal.show=false"></button>
+        </div>
+        <div class="modal-card__body">
+          <p class="text-muted mb-3">
+            Invoice {{ paymentModal.invoiceNumber }} — Total:
+            <strong>₹{{ Number(paymentModal.total).toLocaleString('en-IN') }}</strong>
+          </p>
+          <div class="mb-3">
+            <label class="form-label">Amount Paid (₹)</label>
+            <input type="number" class="form-control" v-model.number="paymentModal.amount"
+                   :max="paymentModal.total" min="0" step="0.01" />
+          </div>
+        </div>
+        <div class="modal-card__footer">
+          <button class="btn btn-secondary" @click="paymentModal.show=false">Cancel</button>
+          <button class="btn btn-success" @click="submitPayment" :disabled="paymentModal.saving">
+            <span v-if="paymentModal.saving"><span class="spinner-border spinner-border-sm me-1"></span>Saving…</span>
+            <span v-else>Save Payment</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+  </div>
   `,
+
   data() {
     return {
       sales: [],
-      filters: {
-        query: "",
-        date: "",
-        month: "",
-        year: ""
-      },
+      filters: { query: "", date: "", month: "", year: "", payStatus: "", prodStatus: "" },
       loading: true,
       error: null,
       exporting: false,
       showSummary: false,
-      token: localStorage.getItem("auth-token") || ""
+      paymentModal: { show: false, saleId: null, invoiceNumber: "", total: 0, amount: 0, saving: false },
     };
   },
+
   computed: {
-    /* same computed props as your version (mergedSales, filteredSales, productSummary) */
     mergedSales() {
       if (!Array.isArray(this.sales)) return [];
       return this.sales.map(sale => {
-        const coils = Array.isArray(sale.used_coils) ? sale.used_coils : [];
-        let rows = [];
-        coils.forEach(coil => {
-          const items = Array.isArray(coil.items) ? coil.items : [];
-          items.forEach(item => {
+        const rows = [];
+        (sale.used_coils || []).forEach(coil => {
+          (coil.items || []).forEach(item => {
             rows.push({
               coilNumber: coil.coil_number || "",
-              make: coil.make || "",
-              type: coil.type || "",
-              color: coil.color || "",
-              length: item.length || 0,
-              rate: item.rate || 0,
-              amount: item.amount || 0
+              make: coil.make || "", type: coil.type || "", color: coil.color || "",
+              length: item.length || 0, quantity: item.quantity || 0,
+              rate: item.rate || 0, amount: item.amount || 0,
             });
           });
         });
         return {
-          saleId: sale.sale_id || "",
-          date: sale.date || "",
-          partyName: sale.party?.name || "",
-          partyPhone: sale.party?.phone || "",
-          totalAmount: sale.total_amount || 0,
-          rows
+          saleId:        sale.sale_id,
+          invoiceNumber: sale.invoice_number,
+          date:          sale.date,
+          partyName:     sale.party?.name || "",
+          partyPhone:    sale.party?.phone || "",
+          totalAmount:   sale.total_amount || 0,
+          netAmount:     sale.net_amount || sale.total_amount || 0,
+          status:        sale.status || "confirmed",
+          paymentStatus: sale.payment_status || "pending",
+          amountPaid:       sale.amount_paid || 0,
+          productionStatus: sale.production_status || "pending",
+          rows,
         };
       });
     },
+
     filteredSales() {
       return this.mergedSales.filter(sale => {
-        let match = true;
         const dateObj = sale.date ? new Date(sale.date) : null;
-
         if (this.filters.query) {
           const q = this.filters.query.toLowerCase();
-          match = match && (
+          if (!(
             sale.partyName.toLowerCase().includes(q) ||
-            sale.partyPhone.toLowerCase().includes(q) ||
+            (sale.partyPhone || "").toLowerCase().includes(q) ||
+            (sale.invoiceNumber || "").toLowerCase().includes(q) ||
             sale.rows.some(r =>
-              r.make.toLowerCase().includes(q) ||
-              r.type.toLowerCase().includes(q) ||
-              r.color.toLowerCase().includes(q) ||
-              r.coilNumber.toLowerCase().includes(q)
+              r.make.toLowerCase().includes(q) || r.type.toLowerCase().includes(q) ||
+              r.color.toLowerCase().includes(q) || r.coilNumber.toLowerCase().includes(q)
             )
-          );
+          )) return false;
         }
-        if (this.filters.date) {
-          match = match && (dateObj?.toISOString().slice(0,10) === this.filters.date);
-        }
-        if (this.filters.month) {
-          match = match && (dateObj?.getMonth() + 1 === Number(this.filters.month));
-        }
-        if (this.filters.year) {
-          match = match && (dateObj?.getFullYear() === Number(this.filters.year));
-        }
-        return match;
+        if (this.filters.date && dateObj?.toISOString().slice(0,10) !== this.filters.date) return false;
+        if (this.filters.month && dateObj?.getMonth()+1 !== Number(this.filters.month)) return false;
+        if (this.filters.year && dateObj?.getFullYear() !== Number(this.filters.year)) return false;
+        if (this.filters.payStatus && sale.paymentStatus !== this.filters.payStatus) return false;
+        if (this.filters.prodStatus && sale.productionStatus !== this.filters.prodStatus) return false;
+        return true;
       });
     },
+
     productSummary() {
-      let summaryMap = {};
+      const map = {};
       this.filteredSales.forEach(sale => {
-        sale.rows.forEach(row => {
-          const key = `${row.make}-${row.type}-${row.color}`;
-          if (!summaryMap[key]) {
-            summaryMap[key] = {
-              make: row.make,
-              type: row.type,
-              color: row.color,
-              totalQuantity: 0,
-              totalLength: 0,
-              totalRate: 0,
-              count: 0,
-              totalAmount: 0
-            };
-          }
-          summaryMap[key].totalQuantity += 1;
-          summaryMap[key].totalLength += Number(row.length) || 0;
-          summaryMap[key].totalRate += Number(row.rate) || 0;
-          summaryMap[key].totalAmount += Number(row.amount) || 0;
-          summaryMap[key].count += 1;
+        sale.rows.forEach(r => {
+          const k = `${r.make}|${r.type}|${r.color}`;
+          if (!map[k]) map[k] = { make:r.make, type:r.type, color:r.color, totalQuantity:0, totalLength:0, totalRate:0, count:0, totalAmount:0 };
+          map[k].totalQuantity += r.quantity || 0;
+          map[k].totalLength   += r.length   || 0;
+          map[k].totalRate     += r.rate      || 0;
+          map[k].totalAmount   += r.amount    || 0;
+          map[k].count++;
         });
       });
-      return Object.values(summaryMap).map(s => ({
-        ...s,
-        avgRate: s.count ? s.totalRate / s.count : 0
-      }));
-    }
+      return Object.values(map).map(s => ({ ...s, avgRate: s.count ? s.totalRate/s.count : 0 }));
+    },
   },
+
   methods: {
+    token() { return localStorage.getItem("auth-token") || ""; },
+
     async fetchSales() {
+      this.loading = true; this.error = null;
       try {
-        const res = await fetch("/api/all_orders", {
-          method: "GET",
-          headers: { "Authentication-Token": this.token }
+        const res = await fetch("/api/all_orders", { headers: { "Authentication-Token": this.token() } });
+        if (!res.ok) throw new Error("Failed to fetch sale orders.");
+        this.sales = await res.json();
+      } catch (e) { this.error = e.message; }
+      finally { this.loading = false; }
+    },
+
+    markPaid(sale) {
+      this.paymentModal = {
+        show: true, saleId: sale.saleId,
+        invoiceNumber: sale.invoiceNumber || `INV-${String(sale.saleId).padStart(4,"0")}`,
+        total: sale.netAmount || sale.totalAmount,
+        amount: sale.netAmount || sale.totalAmount,
+        saving: false,
+      };
+    },
+
+    async submitPayment() {
+      this.paymentModal.saving = true;
+      try {
+        const res = await fetch(`/api/sales/${this.paymentModal.saleId}/payment`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "Authentication-Token": this.token() },
+          body: JSON.stringify({ amount_paid: this.paymentModal.amount }),
         });
-        if (!res.ok) throw new Error("Failed to fetch sale orders");
+        if (!res.ok) throw new Error("Payment update failed.");
         const data = await res.json();
-        this.sales = Array.isArray(data) ? data : [];
-      } catch (err) {
-        this.error = err.message;
+        const sale = this.mergedSales.find(s => s.saleId === this.paymentModal.saleId);
+        if (sale) { sale.paymentStatus = data.payment_status; sale.amountPaid = data.amount_paid; }
+        this.paymentModal.show = false;
+        await this.fetchSales();
+        this.$toast.success("Payment recorded successfully!");
+      } catch (e) {
+        this.$toast.error(e.message);
       } finally {
-        this.loading = false;
+        this.paymentModal.saving = false;
       }
     },
-    toggleView() {
-      this.showSummary = !this.showSummary;
-    },
-    exportCSV() {
-      try {
-        this.exporting = true;
 
-        let rows = [];
-        if (this.showSummary) {
-          rows.push(["Make", "Type", "Color", "Total Quantity", "Total Length", "Average Rate", "Total Amount"]);
-          this.productSummary.forEach(s => {
+    async deleteSale(saleId) {
+      if (!confirm("Delete this sale order? This cannot be undone.")) return;
+      try {
+        const res = await fetch(`/api/sales/${saleId}`, {
+          method: "DELETE", headers: { "Authentication-Token": this.token() },
+        });
+        if (!res.ok) throw new Error("Delete failed.");
+        await this.fetchSales();
+        this.$toast.success("Sale order deleted.");
+      } catch (e) { this.$toast.error(e.message); }
+    },
+
+    clearFilters() { this.filters = { query:"", date:"", month:"", year:"", payStatus:"", prodStatus:"" }; },
+
+    monthName(m) {
+      return ["","Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][m];
+    },
+
+    formatDate(d) { if (!d) return "—"; return new Date(d).toLocaleDateString("en-IN"); },
+
+    capitalize(s) { return s ? s[0].toUpperCase() + s.slice(1) : "—"; },
+
+    payBadge(s) {
+      return { paid:"bg-success", partial:"bg-warning text-dark", pending:"bg-danger" }[s] || "bg-secondary";
+    },
+    statusBadge(s) {
+      return { confirmed:"bg-primary", draft:"bg-secondary", cancelled:"bg-danger" }[s] || "bg-secondary";
+    },
+
+    prodBadge(s) {
+      return { pending:"bg-secondary", in_progress:"bg-primary", completed:"bg-success" }[s] || "bg-secondary";
+    },
+
+    prodLabel(s) {
+      return { pending:"Pending", in_progress:"In Progress", completed:"Completed" }[s]
+        || (s ? s[0].toUpperCase() + s.slice(1) : "—");
+    },
+
+    async updateProductionStatus(saleId, newStatus) {
+      try {
+        const res = await fetch(`/api/sales/${saleId}/production-status`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "Authentication-Token": this.token() },
+          body: JSON.stringify({ production_status: newStatus }),
+        });
+        if (!res.ok) throw new Error("Failed to update production status.");
+        const d = await res.json();
+        const raw = this.sales.find(s => s.sale_id === saleId);
+        if (raw) raw.production_status = d.production_status;
+        this.$toast.success("Production status updated.");
+      } catch (e) { this.$toast.error(e.message); }
+    },
+
+    exportCSV() {
+      this.exporting = true;
+      try {
+        const rows = [["Invoice","Date","Party","Phone","Coil","Make","Type","Color","Length","Qty","Rate","Amount","Total"]];
+        this.filteredSales.forEach(sale => {
+          if (!sale.rows.length) {
+            rows.push([sale.invoiceNumber||"", this.formatDate(sale.date), sale.partyName,
+                        sale.partyPhone,"","","","","","","","", sale.totalAmount]);
+            return;
+          }
+          sale.rows.forEach((r, i) => {
             rows.push([
-              s.make, s.type, s.color,
-              s.totalQuantity, s.totalLength,
-              s.avgRate.toFixed(2), s.totalAmount
+              i===0 ? (sale.invoiceNumber||"") : "",
+              i===0 ? this.formatDate(sale.date) : "",
+              i===0 ? sale.partyName : "",
+              i===0 ? (sale.partyPhone||"") : "",
+              r.coilNumber, r.make, r.type, r.color,
+              r.length, r.quantity, r.rate, r.amount,
+              i===0 ? sale.totalAmount : "",
             ]);
           });
-        } else {
-          rows.push(["Sale ID","Date","Party Name","Phone","Coil Number","Make","Type","Color","Length","Rate","Amount","Total Amount"]);
-          this.filteredSales.forEach(sale => {
-            sale.rows.forEach((r, idx) => {
-              rows.push([
-                idx === 0 ? sale.saleId : "",
-                idx === 0 ? this.formatDate(sale.date) : "",
-                idx === 0 ? sale.partyName : "",
-                idx === 0 ? sale.partyPhone : "",
-                r.coilNumber, r.make, r.type, r.color,
-                r.length, r.rate, r.amount,
-                idx === 0 ? sale.totalAmount : ""
-              ]);
-            });
+        });
+        const csv = rows.map(r => r.map(v => `"${v}"`).join(",")).join("\n");
+        const url = URL.createObjectURL(new Blob([csv], { type:"text/csv" }));
+        Object.assign(document.createElement("a"), { href:url, download:"sale_orders.csv" }).click();
+        URL.revokeObjectURL(url);
+      } finally { this.exporting = false; }
+    },
+
+    importCSV(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = async e => {
+        const rows = e.target.result.trim().split("\n").map(r =>
+          r.split(",").map(v => v.replace(/^"|"$/g,"").trim())
+        );
+        if (rows.length < 2) { this.$toast.warning("CSV has no data rows."); return; }
+        const data = rows.slice(1).map(row => ({
+          date: row[1], party: { name: row[2], phone: row[3] },
+          used_coils: [{ coil_number: row[4], make: row[5], type: row[6], color: row[7],
+            items: [{ length: +row[8]||0, quantity: +row[9]||1, rate: +row[10]||0, amount: +row[11]||0 }] }],
+          total_amount: +row[12]||0,
+        })).filter(o => o.party.name);
+        try {
+          const res = await fetch("/api/add_orders", {
+            method:"POST",
+            headers: { "Content-Type":"application/json", "Authentication-Token": this.token() },
+            body: JSON.stringify(data),
           });
-        }
-
-        const csvContent = rows.map(r => r.map(v => `"${v}"`).join(",")).join("\n");
-        const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
-        const url = window.URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = this.showSummary ? "product_summary.csv" : "sale_orders.csv";
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        window.URL.revokeObjectURL(url);
-      } catch (err) {
-        alert(err.message);
-      } finally {
-        this.exporting = false;
-      }
+          if (!res.ok) throw new Error((await res.json()).error || "Import failed.");
+          this.$toast.success(`Imported ${data.length} orders.`);
+          await this.fetchSales();
+        } catch (e) { this.$toast.error(e.message); }
+      };
+      reader.readAsText(file);
+      event.target.value = "";
     },
-importCSV(event) {
-  const file = event.target.files[0];
-  if (!file) return;
-
-  const reader = new FileReader();
-  reader.onload = async e => {
-    const text = e.target.result;
-    const rows = text.split("\n").map(r => r.split(",").map(v => v.replace(/"/g, "")));
-    const headers = rows[0];
-    const dataRows = rows.slice(1);
-
-    let imported = [];
-    dataRows.forEach(row => {
-      if (row.length < 12) return;
-      imported.push({
-        sale_id: row[0],
-        date: row[1],
-        party: { name: row[2], phone: row[3] },
-        used_coils: [{
-          coil_number: row[4],
-          make: row[5],
-          type: row[6],
-          color: row[7],
-          items: [{
-            length: Number(row[8]),
-            rate: Number(row[9]),
-            amount: Number(row[10])
-          }]
-        }],
-        total_amount: Number(row[11]) || 0
-      });
-    });
-
-    if (!imported.length) {
-      alert("❌ No valid rows found in CSV.");
-      return;
-    }
-
-    try {
-      // 🔹 Send imported data to backend
-      const res = await fetch("/api/add_orders", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authentication-Token": this.token
-        },
-        body: JSON.stringify(imported)   // send as array
-      });
-
-      if (!res.ok) throw new Error("Failed to save orders to backend");
-
-      const saved = await res.json();
-
-      // 🔹 Update frontend state only if backend save succeeded
-      this.sales = [...this.sales, ...saved];
-      alert("✅ CSV Imported & Saved to Database!");
-    } catch (err) {
-      alert("⚠️ Import failed: " + err.message);
-    }
-  };
-  reader.readAsText(file);
-}
-,
-    formatDate(dateStr) {
-      const date = new Date(dateStr);
-      return date.toLocaleDateString();
-    },
-    applyFilters() {
-      this.filters = { ...this.filters };
-    },
-    clearFilters() {
-      this.filters = { query: "", date: "", month: "", year: "" };
-    }
   },
-  mounted() {
-    this.fetchSales();
-  }
+
+  mounted() { this.fetchSales(); },
 };
