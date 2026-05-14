@@ -1965,3 +1965,18 @@ body {
 .text-accent      { color: var(--accent) !important; }
 .border-accent-soft { border-color: #c7d2fe !important; }
 
+/* ── Import stat chips ────────────────────────────────────────────────────── */
+.import-stat {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border-radius: 20px;
+  font-size: 13px;
+  font-weight: 500;
+}
+.import-stat--success { background: #d1fae5; color: #065f46; }
+.import-stat--warn    { background: #fef3c7; color: #92400e; }
+.import-stat--info    { background: #e0e7ff; color: #3730a3; }
+.import-stat--danger  { background: #fee2e2; color: #991b1b; }
+

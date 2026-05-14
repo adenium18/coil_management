@@ -887,7 +887,7 @@ def dashboard():
             finished_count += 1
 
         coil_data.append({
-            "id": coil.id, "coil_number": coil.coil_number,
+            "id": coil.id, "coil_id": coil.id, "coil_number": coil.coil_number,
             "make": coil.make, "type": coil.type, "color": coil.color,
             "original_length": original,
             "used_length":     round(used_length, 2),
@@ -926,61 +926,204 @@ def import_orders():
     if "file" not in request.files:
         return jsonify({"error": "No file uploaded"}), 400
     file = request.files["file"]
-    if not file.filename.endswith(".csv"):
+    if not file.filename.lower().endswith(".csv"):
         return jsonify({"error": "Invalid file format — please upload a .csv file"}), 400
 
-    stream  = io.StringIO(file.stream.read().decode("utf-8"))
-    reader  = csv.DictReader(stream)
-    oid     = _owner_id() if not _is_admin() else None
-    imported         = 0
-    created_customers = []
+    # mode: "skip" (default) → skip duplicates; "overwrite" reserved for future support
+    mode = request.form.get("mode", "skip").strip().lower()
 
+    stream = io.StringIO(file.stream.read().decode("utf-8-sig"))
+    reader = csv.DictReader(stream)
+
+    oid      = _owner_id() if not _is_admin() else None
+    settings = CompanySettings.query.filter_by(owner_id=oid).first()
+    prefix   = (settings and settings.invoice_prefix) or "INV"
+
+    # Pre-load all existing non-null invoice numbers for this owner in one query.
+    # This set is also updated as new invoices are accepted, catching intra-CSV duplicates.
+    existing_invoices = set(
+        row[0] for row in
+        db.session.query(Sale.invoice_number).filter(
+            Sale.owner_id == oid,
+            Sale.invoice_number.isnot(None),
+        ).all()
+    )
+
+    # Group CSV rows into invoice groups.
+    # A row with a non-blank Invoice column starts a new group; blank continues the previous.
+    groups    = []
+    cur_group = None
     for row in reader:
+        inv = row.get("Invoice", "").strip()
+        if inv:
+            cur_group = {"invoice": inv, "rows": [row]}
+            groups.append(cur_group)
+        elif cur_group is not None:
+            cur_group["rows"].append(row)
+
+    imported      = 0
+    skipped       = 0
+    duplicates    = []   # [{invoice_number, party_name, date}]
+    errors        = []   # [{invoice, reason}]
+    item_warnings = []   # [{invoice, coil, reason}]  — item-level skips
+
+    def _flt(val, default=0.0):
         try:
-            party_name  = row.get("Party Name", "").strip()
-            party_phone = row.get("Phone", "").strip()
+            return float(val) if str(val).strip() else default
+        except (ValueError, TypeError):
+            return default
+
+    def _find_coil(coil_number):
+        """Case-insensitive coil lookup."""
+        return _coil_q().filter(
+            func.lower(Coil.coil_number) == coil_number.lower()
+        ).first()
+
+    def _find_product(coil, make, type_, color):
+        """
+        Case-insensitive product lookup.
+        1st: exact make+type+color+coil match (case-insensitive)
+        2nd: any product linked to this coil  (fallback)
+        Returns (product, used_fallback).
+        """
+        product = _product_q().filter(
+            func.lower(Product.make)  == make.lower(),
+            func.lower(Product.type)  == type_.lower(),
+            func.lower(Product.color) == color.lower(),
+            Product.coil_id           == coil.id,
+        ).first()
+        if product:
+            return product, False
+        product = _product_q().filter_by(coil_id=coil.id).first()
+        return product, True
+
+    for g in groups:
+        first   = g["rows"][0]
+        csv_inv = g["invoice"]
+
+        # ── Duplicate check ───────────────────────────────────────────────────
+        if csv_inv and csv_inv in existing_invoices:
+            skipped += 1
+            duplicates.append({
+                "invoice_number": csv_inv,
+                "party_name":     first.get("Party Name", "").strip(),
+                "date":           first.get("Date", "").strip(),
+            })
+            continue
+
+        # ── Build the Sale ────────────────────────────────────────────────────
+        try:
+            party_name = first.get("Party Name", "").strip()
             if not party_name:
+                skipped += 1
+                errors.append({"invoice": csv_inv, "reason": "Party Name is blank"})
                 continue
 
-            customer = _party_q().filter_by(phone=party_phone).first() if party_phone else None
+            party_phone = first.get("Phone", "").strip()
+            customer    = _party_q().filter_by(phone=party_phone).first() if party_phone else None
             if not customer:
                 customer = Party(name=party_name, phone=party_phone or None, owner_id=oid)
                 db.session.add(customer)
                 db.session.flush()
-                created_customers.append(party_name)
 
-            sale = Sale(party_id=customer.id,
-                        total_amount=float(row.get("Total Amount") or 0), owner_id=oid)
+            date_str = first.get("Date", "").strip()
+            try:
+                sale_date = datetime.strptime(date_str, "%Y-%m-%d") if date_str else datetime.now()
+            except ValueError:
+                sale_date = datetime.now()
+
+            invoice_no = csv_inv if csv_inv else f"{prefix}-{Sale.query.filter_by(owner_id=oid).count() + 1:04d}"
+
+            total_amount = _flt(first.get("Total Amount (Rs)") or first.get("Total Amount"))
+            net_raw      = (first.get("Net Amount (Rs)") or first.get("Net Amount", "")).strip()
+            net_amount   = _flt(net_raw) if net_raw else total_amount
+            discount     = _flt(first.get("Discount"))
+            tax_rate     = _flt(first.get("Tax Rate (%)"))
+            pay_status   = (first.get("Payment Status",    "") or "pending").strip().lower()
+            prod_status  = (first.get("Production Status", "") or "pending").strip().lower()
+
+            sale = Sale(
+                party_id=customer.id,
+                date=sale_date,
+                total_amount=total_amount,
+                net_amount=net_amount,
+                discount=discount,
+                tax_rate=tax_rate,
+                payment_status=pay_status    if pay_status    in ("pending","partial","paid")           else "pending",
+                production_status=prod_status if prod_status  in ("pending","in_progress","completed")  else "pending",
+                status="confirmed",
+                invoice_number=invoice_no,
+                owner_id=oid,
+            )
             db.session.add(sale)
             db.session.flush()
+            existing_invoices.add(invoice_no)   # prevent intra-CSV dupe
 
-            coil_number = row.get("Coil Number", "").strip()
-            if coil_number:
-                coil = _coil_q().filter_by(coil_number=coil_number).first()
-                if coil:
-                    product = _product_q().filter_by(
-                        make=row.get("Make", ""), type=row.get("Type", ""),
-                        color=row.get("Color", ""), coil_id=coil.id
-                    ).first()
-                    if product:
-                        sc = SaleCoil(sale_id=sale.id, coil_id=coil.id)
-                        db.session.add(sc)
-                        db.session.flush()
-                        db.session.add(SaleItem(
-                            sale_coil_id=sc.id, product_id=product.id,
-                            length=float(row.get("Length") or 0),
-                            quantity=int(row.get("Quantity") or 1),
-                            rate=float(row.get("Rate") or 0),
-                            amount=float(row.get("Amount") or 0),
-                        ))
+            # ── Attach coil items ─────────────────────────────────────────────
+            for row in g["rows"]:
+                coil_number = row.get("Coil Number", "").strip()
+                if not coil_number:
+                    continue
+
+                coil = _find_coil(coil_number)
+                if not coil:
+                    item_warnings.append({
+                        "invoice": invoice_no, "coil": coil_number,
+                        "reason": f"Coil '{coil_number}' not found in database",
+                    })
+                    continue
+
+                make  = row.get("Make",  "").strip()
+                type_ = row.get("Type",  "").strip()
+                color = row.get("Color", "").strip()
+
+                product, used_fallback = _find_product(coil, make, type_, color)
+                if not product:
+                    item_warnings.append({
+                        "invoice": invoice_no, "coil": coil_number,
+                        "reason": f"No product found for coil '{coil_number}' ({make} {type_} {color})",
+                    })
+                    continue
+
+                sc = SaleCoil(sale_id=sale.id, coil_id=coil.id)
+                db.session.add(sc)
+                db.session.flush()
+
+                length   = _flt(row.get("Length (ft)") or row.get("Length"))
+                quantity = max(int(_flt(row.get("Qty") or row.get("Quantity"), 1)), 1)
+                rate     = _flt(row.get("Rate (Rs/ft)") or row.get("Rate"))
+                amount   = _flt(row.get("Amount (Rs)")  or row.get("Amount"))
+                db.session.add(SaleItem(
+                    sale_coil_id=sc.id, product_id=product.id,
+                    length=length, quantity=quantity, rate=rate, amount=amount,
+                ))
+
+                if used_fallback:
+                    item_warnings.append({
+                        "invoice": invoice_no, "coil": coil_number,
+                        "reason": f"Exact product ({make} {type_} {color}) not found — used first available product for this coil",
+                    })
+
             imported += 1
-        except Exception as e:
-            db.session.rollback()
-            return jsonify({"error": str(e)}), 500
 
-    db.session.commit()
-    return jsonify({"message": f"Imported {imported} rows successfully",
-                    "new_customers": created_customers})
+        except Exception as exc:
+            db.session.rollback()
+            errors.append({"invoice": csv_inv, "reason": str(exc)})
+            skipped += 1
+
+    try:
+        db.session.commit()
+    except Exception as exc:
+        db.session.rollback()
+        return jsonify({"error": f"Commit failed: {exc}"}), 500
+
+    return jsonify({
+        "imported":      imported,
+        "skipped":       skipped,
+        "duplicates":    duplicates,
+        "errors":        errors,
+        "item_warnings": item_warnings,
+    })
 
 
 @app.route("/api/add_orders", methods=["POST"])
@@ -1038,6 +1181,96 @@ def add_orders():
     except Exception as e:
         db.session.rollback()
         return jsonify({"error": str(e)}), 400
+
+
+# ── Export Orders ─────────────────────────────────────────────────────────────
+
+@app.route("/api/export_orders", methods=["GET"])
+@auth_required("token")
+def export_orders():
+    start_str = request.args.get("start")
+    end_str   = request.args.get("end")
+
+    q = _sale_q()
+    if start_str:
+        try:
+            q = q.filter(Sale.date >= datetime.strptime(start_str, "%Y-%m-%d"))
+        except ValueError:
+            return jsonify({"error": "Invalid start date. Use YYYY-MM-DD."}), 400
+    if end_str:
+        try:
+            q = q.filter(Sale.date < datetime.strptime(end_str, "%Y-%m-%d") + timedelta(days=1))
+        except ValueError:
+            return jsonify({"error": "Invalid end date. Use YYYY-MM-DD."}), 400
+
+    sales = q.order_by(Sale.date.asc()).all()
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow([
+        "Invoice", "Date", "Party Name", "Phone", "Coil Number",
+        "Make", "Type", "Color", "Length (ft)", "Qty",
+        "Rate (Rs/ft)", "Amount (Rs)", "Total Amount (Rs)", "Net Amount (Rs)",
+        "Discount", "Tax Rate (%)", "Payment Status", "Production Status",
+    ])
+
+    for sale in sales:
+        party        = sale.party
+        party_name   = party.name  if party else ""
+        party_phone  = party.phone if party else ""
+        invoice      = sale.invoice_number or f"INV-{sale.id:04d}"
+        date_str     = sale.date.strftime("%Y-%m-%d") if sale.date else ""
+        rows_written = 0
+
+        for sc in sale.used_coils:
+            coil = sc.coil
+            for item in sc.items:
+                product = item.product
+                first   = rows_written == 0
+                writer.writerow([
+                    invoice if first else "",
+                    date_str if first else "",
+                    party_name  if first else "",
+                    party_phone if first else "",
+                    coil.coil_number if coil else "",
+                    coil.make  if coil else (product.make  if product else ""),
+                    coil.type  if coil else (product.type  if product else ""),
+                    coil.color if coil else (product.color if product else ""),
+                    item.length   or 0,
+                    item.quantity or 0,
+                    item.rate     or 0,
+                    item.amount   or 0,
+                    (sale.total_amount or 0) if first else "",
+                    (sale.net_amount or sale.total_amount or 0) if first else "",
+                    (sale.discount or 0)  if first else "",
+                    (sale.tax_rate or 0)  if first else "",
+                    (sale.payment_status    or "pending") if first else "",
+                    (sale.production_status or "pending") if first else "",
+                ])
+                rows_written += 1
+
+        if rows_written == 0:
+            writer.writerow([
+                invoice, date_str, party_name, party_phone, "", "", "", "",
+                "", "", "", "",
+                sale.total_amount or 0,
+                sale.net_amount or sale.total_amount or 0,
+                sale.discount or 0,
+                sale.tax_rate or 0,
+                sale.payment_status    or "pending",
+                sale.production_status or "pending",
+            ])
+
+    fname = "sale_orders"
+    if start_str: fname += f"_{start_str}"
+    if end_str:   fname += f"_to_{end_str}"
+    fname += ".csv"
+
+    from flask import make_response
+    resp = make_response(output.getvalue())
+    resp.headers["Content-Type"]        = "text/csv; charset=utf-8"
+    resp.headers["Content-Disposition"] = f'attachment; filename="{fname}"'
+    return resp
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────

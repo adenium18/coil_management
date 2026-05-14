@@ -7,17 +7,21 @@ export default {
         <h1 class="page-title">Sale Orders</h1>
         <p class="page-sub">{{ filteredSales.length }} order{{ filteredSales.length !== 1 ? 's' : '' }} shown</p>
       </div>
-      <div class="d-flex gap-2 flex-wrap">
-        <button class="btn btn-outline-success btn-sm" @click="exportCSV" :disabled="exporting">
+      <div class="d-flex gap-2 flex-wrap align-items-center">
+        <input type="date" class="form-control form-control-sm" v-model="exportRange.start"
+               style="width:135px;" title="Export from date" />
+        <span class="text-muted small">–</span>
+        <input type="date" class="form-control form-control-sm" v-model="exportRange.end"
+               style="width:135px;" title="Export to date" />
+        <button class="btn btn-outline-success btn-sm" @click="downloadExport" :disabled="exporting">
           <i class="bi bi-download me-1"></i>{{ exporting ? 'Exporting…' : 'Export CSV' }}
+        </button>
+        <button class="btn btn-outline-secondary btn-sm" @click="openImport">
+          <i class="bi bi-upload me-1"></i>Import CSV
         </button>
         <button class="btn btn-outline-primary btn-sm" @click="showSummary = !showSummary">
           <i class="bi" :class="showSummary ? 'bi-list-ul' : 'bi-bar-chart-line'"></i>
           {{ showSummary ? 'Show Orders' : 'Summary' }}
-        </button>
-        <input type="file" accept=".csv" @change="importCSV" ref="fileInput" class="d-none" />
-        <button class="btn btn-outline-secondary btn-sm" @click="$refs.fileInput.click()">
-          <i class="bi bi-upload me-1"></i>Import CSV
         </button>
       </div>
     </div>
@@ -232,6 +236,152 @@ export default {
       </div>
     </div>
 
+    <!-- Import modal -->
+    <div v-if="importModal.show" class="modal-backdrop-custom" @click.self="importModal.show=false">
+      <div class="modal-card" style="max-width:560px;">
+        <div class="modal-card__header">
+          <h5 class="mb-0"><i class="bi bi-upload me-2 text-primary"></i>Import Sale Orders</h5>
+          <button class="btn-close" @click="importModal.show=false"></button>
+        </div>
+        <div class="modal-card__body">
+
+          <!-- Instructions -->
+          <p class="text-muted mb-3" style="font-size:13px;">
+            Upload a CSV matching the export format, or
+            <a href="#" @click.prevent="downloadTemplate" class="text-primary fw-semibold">download a blank template</a>.
+            Rows sharing the same Invoice number are grouped into one order.
+          </p>
+
+          <!-- Mode selector -->
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Duplicate Handling</label>
+            <div class="d-flex gap-2">
+              <button class="btn btn-sm flex-fill"
+                      :class="importModal.mode === 'skip' ? 'btn-primary' : 'btn-outline-secondary'"
+                      @click="importModal.mode = 'skip'">
+                <i class="bi bi-skip-forward me-1"></i>Skip Duplicates
+              </button>
+              <button class="btn btn-sm flex-fill" disabled
+                      title="Coming soon"
+                      :class="importModal.mode === 'overwrite' ? 'btn-warning' : 'btn-outline-secondary'">
+                <i class="bi bi-arrow-clockwise me-1"></i>Overwrite Existing
+                <span class="badge bg-secondary ms-1" style="font-size:10px;">Soon</span>
+              </button>
+            </div>
+            <div class="form-text">
+              <span v-if="importModal.mode === 'skip'">
+                <i class="bi bi-info-circle me-1"></i>Orders whose invoice number already exists in the database will be skipped.
+              </span>
+            </div>
+          </div>
+
+          <!-- File picker -->
+          <div class="mb-3">
+            <label class="form-label fw-semibold">CSV File</label>
+            <input type="file" accept=".csv" class="form-control" ref="importFile"
+                   @change="handleFileSelect" />
+            <div v-if="importModal.rowCount" class="form-text text-success mt-1">
+              <i class="bi bi-check-circle me-1"></i>
+              {{ importModal.rowCount }} data row{{ importModal.rowCount !== 1 ? 's' : '' }} detected
+              ({{ importModal.groupCount }} invoice group{{ importModal.groupCount !== 1 ? 's' : '' }}).
+            </div>
+          </div>
+
+          <!-- ── Results after import ── -->
+          <template v-if="importModal.result">
+
+            <!-- Summary stat chips -->
+            <div class="d-flex gap-2 flex-wrap mb-3">
+              <div class="import-stat import-stat--success">
+                <i class="bi bi-check-circle-fill"></i>
+                <span><strong>{{ importModal.result.imported }}</strong> imported</span>
+              </div>
+              <div class="import-stat import-stat--warn"
+                   v-if="importModal.result.duplicates && importModal.result.duplicates.length">
+                <i class="bi bi-exclamation-triangle-fill"></i>
+                <span><strong>{{ importModal.result.duplicates.length }}</strong> duplicate{{ importModal.result.duplicates.length !== 1 ? 's' : '' }} skipped</span>
+              </div>
+              <div class="import-stat import-stat--info"
+                   v-if="importModal.result.item_warnings && importModal.result.item_warnings.length">
+                <i class="bi bi-info-circle-fill"></i>
+                <span><strong>{{ importModal.result.item_warnings.length }}</strong> item warning{{ importModal.result.item_warnings.length !== 1 ? 's' : '' }}</span>
+              </div>
+              <div class="import-stat import-stat--danger"
+                   v-if="importModal.result.errors && importModal.result.errors.length">
+                <i class="bi bi-x-circle-fill"></i>
+                <span><strong>{{ importModal.result.errors.length }}</strong> error{{ importModal.result.errors.length !== 1 ? 's' : '' }}</span>
+              </div>
+            </div>
+
+            <!-- Duplicate invoices table -->
+            <div v-if="importModal.result.duplicates && importModal.result.duplicates.length" class="mb-3">
+              <p class="fw-semibold text-warning mb-1" style="font-size:13px;">
+                <i class="bi bi-exclamation-triangle me-1"></i>Duplicate Invoices (already in database)
+              </p>
+              <div style="max-height:160px;overflow-y:auto;border:1px solid #ffc107;border-radius:6px;">
+                <table class="table table-sm mb-0" style="font-size:12px;">
+                  <thead class="table-warning" style="position:sticky;top:0;">
+                    <tr>
+                      <th>Invoice #</th>
+                      <th>Party</th>
+                      <th>Date</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="(d, i) in importModal.result.duplicates" :key="'dup-'+i">
+                      <td class="fw-semibold text-warning">{{ d.invoice_number }}</td>
+                      <td>{{ d.party_name || '—' }}</td>
+                      <td class="text-muted">{{ d.date || '—' }}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <!-- Item warnings (coil/product not found) -->
+            <div v-if="importModal.result.item_warnings && importModal.result.item_warnings.length" class="mb-3">
+              <p class="fw-semibold text-secondary mb-1" style="font-size:13px;">
+                <i class="bi bi-info-circle me-1"></i>Item Warnings
+                <span class="badge bg-secondary ms-1">{{ importModal.result.item_warnings.length }}</span>
+              </p>
+              <ul class="list-group list-group-flush"
+                  style="font-size:12px;max-height:120px;overflow-y:auto;border:1px solid #dee2e6;border-radius:6px;">
+                <li v-for="(w, i) in importModal.result.item_warnings" :key="'warn-'+i"
+                    class="list-group-item list-group-item-secondary px-2 py-1">
+                  <strong>{{ w.invoice }}</strong> / Coil {{ w.coil }}: {{ w.reason }}
+                </li>
+              </ul>
+            </div>
+
+            <!-- Error list -->
+            <div v-if="importModal.result.errors && importModal.result.errors.length">
+              <p class="fw-semibold text-danger mb-1" style="font-size:13px;">
+                <i class="bi bi-x-circle me-1"></i>Errors
+              </p>
+              <ul class="list-group list-group-flush"
+                  style="font-size:12px;max-height:120px;overflow-y:auto;border:1px solid #f5c6cb;border-radius:6px;">
+                <li v-for="(e, i) in importModal.result.errors" :key="'err-'+i"
+                    class="list-group-item list-group-item-danger px-2 py-1">
+                  <strong>{{ e.invoice || '—' }}</strong>: {{ e.reason }}
+                </li>
+              </ul>
+            </div>
+
+          </template>
+        </div>
+        <div class="modal-card__footer">
+          <button class="btn btn-secondary" @click="importModal.show=false">Close</button>
+          <button class="btn btn-primary" @click="doImport"
+                  :disabled="!importModal.file || importModal.loading">
+            <span v-if="importModal.loading">
+              <span class="spinner-border spinner-border-sm me-1"></span>Importing…
+            </span>
+            <span v-else><i class="bi bi-upload me-1"></i>Import</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
     <!-- Payment modal -->
     <div v-if="paymentModal.show" class="modal-backdrop-custom" @click.self="paymentModal.show=false">
       <div class="modal-card" style="max-width:380px;">
@@ -271,6 +421,8 @@ export default {
       error: null,
       exporting: false,
       showSummary: false,
+      exportRange: { start: "", end: "" },
+      importModal: { show: false, file: null, fileName: "", rowCount: 0, groupCount: 0, loading: false, result: null, mode: "skip" },
       paymentModal: { show: false, saleId: null, invoiceNumber: "", total: 0, amount: 0, saving: false },
     };
   },
@@ -446,63 +598,109 @@ export default {
       } catch (e) { this.$toast.error(e.message); }
     },
 
-    exportCSV() {
+    async downloadExport() {
       this.exporting = true;
       try {
-        const rows = [["Invoice","Date","Party","Phone","Coil","Make","Type","Color","Length","Qty","Rate","Amount","Total"]];
-        this.filteredSales.forEach(sale => {
-          if (!sale.rows.length) {
-            rows.push([sale.invoiceNumber||"", this.formatDate(sale.date), sale.partyName,
-                        sale.partyPhone,"","","","","","","","", sale.totalAmount]);
-            return;
-          }
-          sale.rows.forEach((r, i) => {
-            rows.push([
-              i===0 ? (sale.invoiceNumber||"") : "",
-              i===0 ? this.formatDate(sale.date) : "",
-              i===0 ? sale.partyName : "",
-              i===0 ? (sale.partyPhone||"") : "",
-              r.coilNumber, r.make, r.type, r.color,
-              r.length, r.quantity, r.rate, r.amount,
-              i===0 ? sale.totalAmount : "",
-            ]);
-          });
-        });
-        const csv = rows.map(r => r.map(v => `"${v}"`).join(",")).join("\n");
-        const url = URL.createObjectURL(new Blob([csv], { type:"text/csv" }));
-        Object.assign(document.createElement("a"), { href:url, download:"sale_orders.csv" }).click();
-        URL.revokeObjectURL(url);
+        let url = "/api/export_orders";
+        const params = [];
+        if (this.exportRange.start) params.push(`start=${this.exportRange.start}`);
+        if (this.exportRange.end)   params.push(`end=${this.exportRange.end}`);
+        if (params.length) url += "?" + params.join("&");
+        const res = await fetch(url, { headers: { "Authentication-Token": this.token() } });
+        if (!res.ok) { this.$toast.error("Export failed."); return; }
+        const blob = await res.blob();
+        const parts = ["sale_orders"];
+        if (this.exportRange.start) parts.push(this.exportRange.start);
+        if (this.exportRange.end)   parts.push("to_" + this.exportRange.end);
+        const link = document.createElement("a");
+        link.href = URL.createObjectURL(blob);
+        link.download = parts.join("_") + ".csv";
+        link.click();
+        URL.revokeObjectURL(link.href);
       } finally { this.exporting = false; }
     },
 
-    importCSV(event) {
+    openImport() {
+      this.importModal = { show: true, file: null, fileName: "", rowCount: 0, groupCount: 0, loading: false, result: null, mode: this.importModal.mode || "skip" };
+    },
+
+    handleFileSelect(event) {
       const file = event.target.files[0];
       if (!file) return;
+      this.importModal.file     = file;
+      this.importModal.fileName = file.name;
+      this.importModal.result   = null;
       const reader = new FileReader();
-      reader.onload = async e => {
-        const rows = e.target.result.trim().split("\n").map(r =>
-          r.split(",").map(v => v.replace(/^"|"$/g,"").trim())
-        );
-        if (rows.length < 2) { this.$toast.warning("CSV has no data rows."); return; }
-        const data = rows.slice(1).map(row => ({
-          date: row[1], party: { name: row[2], phone: row[3] },
-          used_coils: [{ coil_number: row[4], make: row[5], type: row[6], color: row[7],
-            items: [{ length: +row[8]||0, quantity: +row[9]||1, rate: +row[10]||0, amount: +row[11]||0 }] }],
-          total_amount: +row[12]||0,
-        })).filter(o => o.party.name);
-        try {
-          const res = await fetch("/api/add_orders", {
-            method:"POST",
-            headers: { "Content-Type":"application/json", "Authentication-Token": this.token() },
-            body: JSON.stringify(data),
-          });
-          if (!res.ok) throw new Error((await res.json()).error || "Import failed.");
-          this.$toast.success(`Imported ${data.length} orders.`);
-          await this.fetchSales();
-        } catch (e) { this.$toast.error(e.message); }
+      reader.onload = e => {
+        const lines = e.target.result.trim().split("\n").filter(l => l.trim());
+        const dataLines = lines.slice(1);
+        this.importModal.rowCount = dataLines.length;
+        let groups = 0;
+        dataLines.forEach(line => {
+          const first = line.split(",")[0].replace(/^"|"$/g, "").trim();
+          if (first) groups++;
+        });
+        this.importModal.groupCount = groups;
       };
       reader.readAsText(file);
-      event.target.value = "";
+    },
+
+    async doImport() {
+      if (!this.importModal.file) return;
+      this.importModal.loading = true;
+      this.importModal.result  = null;
+      try {
+        const form = new FormData();
+        form.append("file", this.importModal.file);
+        form.append("mode", this.importModal.mode || "skip");
+        const res = await fetch("/api/import_orders", {
+          method: "POST",
+          headers: { "Authentication-Token": this.token() },
+          body: form,
+        });
+        const data = await res.json();
+        if (!res.ok) { this.$toast.error(data.error || "Import failed."); return; }
+        this.importModal.result = data;
+
+        const dupCount = (data.duplicates || []).length;
+        const errCount = (data.errors || []).length;
+
+        if (data.imported > 0) {
+          let msg = `${data.imported} order${data.imported !== 1 ? "s" : ""} imported.`;
+          if (dupCount) msg += ` ${dupCount} duplicate${dupCount !== 1 ? "s" : ""} skipped.`;
+          this.$toast.success(msg);
+          await this.fetchSales();
+        } else if (dupCount > 0 && errCount === 0) {
+          this.$toast.warning(`All ${dupCount} invoice${dupCount !== 1 ? "s" : ""} already exist — nothing imported.`);
+        } else {
+          this.$toast.warning("No orders were imported.");
+        }
+      } catch (e) {
+        this.$toast.error("Import failed: " + e.message);
+      } finally {
+        this.importModal.loading = false;
+      }
+    },
+
+    downloadTemplate() {
+      const headers = [
+        "Invoice","Date","Party Name","Phone","Coil Number",
+        "Make","Type","Color","Length (ft)","Qty",
+        "Rate (Rs/ft)","Amount (Rs)","Total Amount (Rs)","Net Amount (Rs)",
+        "Discount","Tax Rate (%)","Payment Status","Production Status",
+      ];
+      const example = [
+        "INV-0001","2025-01-15","Customer Name","9876543210","COIL-001",
+        "Tata","PPGI","White","10","5",
+        "50","2500","12500","12500",
+        "0","0","pending","pending",
+      ];
+      const csv = [headers, example].map(r => r.map(v => `"${v}"`).join(",")).join("\n");
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+      link.download = "import_template.csv";
+      link.click();
+      URL.revokeObjectURL(link.href);
     },
   },
 

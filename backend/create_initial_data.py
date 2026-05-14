@@ -2,9 +2,20 @@ from flask import current_app as app
 from flask_security import SQLAlchemyUserDatastore, hash_password
 from backend.models import db, Product, Party, Coil, Sale, SaleItem, SaleCoil
 from datetime import datetime
+from sqlalchemy import text
 
 with app.app_context():
     db.create_all()
+
+    # Apply partial unique index on (invoice_number, owner_id) for existing SQLite databases.
+    # CREATE UNIQUE INDEX ... WHERE ... is idempotent via IF NOT EXISTS.
+    with db.engine.connect() as _conn:
+        _conn.execute(text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_invoice_owner "
+            "ON sale(invoice_number, owner_id) "
+            "WHERE invoice_number IS NOT NULL"
+        ))
+        _conn.commit()
 
     userdatastore: SQLAlchemyUserDatastore = app.security.datastore
 

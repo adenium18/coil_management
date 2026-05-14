@@ -1,6 +1,7 @@
 from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime
 from flask_security import UserMixin, RoleMixin
+from sqlalchemy import Index, text as sa_text
 
 db = SQLAlchemy()
 
@@ -158,6 +159,18 @@ class Sale(db.Model):
     transport_details  = db.Column(db.String(255))
     invoice_number     = db.Column(db.String(50))
     owner_id           = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=True)
+
+    __table_args__ = (
+        # Partial unique index: enforces uniqueness only on non-NULL invoice numbers per owner.
+        # SQLite allows multiple NULLs even with a UNIQUE constraint, so this is safe for
+        # legacy rows that have no invoice number.
+        Index(
+            "uq_invoice_owner",
+            "invoice_number", "owner_id",
+            unique=True,
+            sqlite_where=sa_text("invoice_number IS NOT NULL"),
+        ),
+    )
 
     party = db.relationship("Party", backref=db.backref("sales", lazy="dynamic"))
     owner = db.relationship("User",  backref=db.backref("sales", lazy="dynamic"),

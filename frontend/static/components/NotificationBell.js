@@ -93,10 +93,12 @@ export default {
     },
 
     async pollUnread() {
+      if (!this.token()) { clearInterval(this.pollTimer); return; }
       try {
         const res = await fetch("/api/notifications", {
           headers: { "Authentication-Token": this.token() },
         });
+        if (res.status === 401) { clearInterval(this.pollTimer); return; }
         if (res.ok) {
           const data = await res.json();
           this.unread = data.unread || 0;
@@ -158,6 +160,7 @@ export default {
   },
 
   mounted() {
+    if (!this.token()) return;
     this.pollUnread();
     this.pollTimer = setInterval(this.pollUnread, 60000);
   },
