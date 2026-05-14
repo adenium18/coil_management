@@ -25,5 +25,6 @@ pyexcel-webio==0.1.4
 lml==0.1.0
 texttable==1.7.0
 chardet==5.2.0
+setuptools>=70.0.0
 gunicorn==22.0.0
 psycopg2-binary==2.9.9
