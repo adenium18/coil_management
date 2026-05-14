@@ -19,12 +19,12 @@ class LocalDevelopmentConfig(Config):
 
 
 class ProductionConfig(Config):
-    # Render places the working dir at /opt/render/project/src.
-    # Flask's instance folder sits inside that dir; sqlite:/// is relative to it.
-    SQLALCHEMY_DATABASE_URI = os.environ.get(
-        "DATABASE_URL",
-        "sqlite:///database.sqlite3",
-    )
+    # Render's PostgreSQL connection strings start with "postgres://" which
+    # SQLAlchemy 1.4+ requires as "postgresql://".
+    _db_url = os.environ.get("DATABASE_URL", "sqlite:///database.sqlite3")
+    if _db_url.startswith("postgres://"):
+        _db_url = _db_url.replace("postgres://", "postgresql://", 1)
+    SQLALCHEMY_DATABASE_URI = _db_url
     DEBUG = False
     SECRET_KEY = os.environ.get("SECRET_KEY", "change-me-in-render-env")
     SECURITY_PASSWORD_SALT = os.environ.get(

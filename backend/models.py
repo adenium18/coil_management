@@ -169,6 +169,7 @@ class Sale(db.Model):
             "invoice_number", "owner_id",
             unique=True,
             sqlite_where=sa_text("invoice_number IS NOT NULL"),
+            postgresql_where=sa_text("invoice_number IS NOT NULL"),
         ),
     )
 
