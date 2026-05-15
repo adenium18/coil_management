@@ -2,6 +2,7 @@
   "name": "coilms",
   "version": "1.0.0",
   "description": "Coil & Sheet Metal Management System",
+  "author": "CoilMS",
   "main": "electron/main.js",
   "scripts": {
     "electron:dev":   "electron .",
@@ -37,7 +38,7 @@
     ],
     "win": {
       "target": [{ "target": "nsis", "arch": ["x64"] }],
-      "icon": "frontend/static/icons/icon-192.png"
+      "icon": "frontend/static/icons/icon-512.png"
     },
     "linux": {
       "target": [{ "target": "AppImage", "arch": ["x64"] }],

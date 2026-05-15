@@ -29,6 +29,10 @@ from backend.models import db, User, Role
 
 
 def createApp():
+    # When frozen by PyInstaller, __file__ points inside a temp dir.
+    # Use sys._MEIPASS as the base so Flask can find templates and static files.
+    base_dir = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
+
     # When running inside Electron, use the OS user-data dir for the instance
     # folder so the SQLite database survives app updates and isn't placed in
     # a read-only Program Files directory.
@@ -36,8 +40,8 @@ def createApp():
 
     app = Flask(
         __name__,
-        template_folder="frontend/templates",
-        static_folder="frontend/static",
+        template_folder=os.path.join(base_dir, "frontend", "templates"),
+        static_folder=os.path.join(base_dir, "frontend", "static"),
         instance_path=instance_path,
     )
 
@@ -77,4 +81,5 @@ import backend.routes                # noqa: E402  registers all API routes
 excel.init_excel(app)
 
 if __name__ == "__main__":
-    app.run()
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="127.0.0.1", port=port, debug=False, threaded=True)
