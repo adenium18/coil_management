@@ -51,8 +51,8 @@ const routes = [
     { path: "/view_all_orders", component: SaleOrder,       meta: { requiresAuth: true } },
     { path: "/search",          component: SearchResults,   meta: { requiresAuth: true } },
 
-    // Legacy root
-    { path: "/", component: AdminHome, meta: { requiresAuth: true } },
+    // Home / landing page (public)
+    { path: "/", component: appinfo },
 ];
 
 const router = new VueRouter({
@@ -77,8 +77,8 @@ router.beforeEach((to, from, next) => {
         return next(role === "admin" ? "/admin-dashboard" : "/user_login");
     }
 
-    // Redirect authenticated users away from login page
-    if (to.path === "/user_login" && token) {
+    // Redirect authenticated users away from public-only pages
+    if ((to.path === "/user_login" || to.path === "/" || to.path === "/app_info") && token) {
         return next(role === "admin" ? "/admin-dashboard" : "/dashboard");
     }
 

@@ -6,7 +6,7 @@ import NotificationBell  from "./components/NotificationBell.js";
 import OfflineBar        from "./components/OfflineBar.js";
 import { installToast }  from "./components/Toast.js";
 
-const PUBLIC_ROUTES = new Set(["/app_info", "/user_login"]);
+const PUBLIC_ROUTES = new Set(["/", "/app_info", "/user_login"]);
 
 /* Global: click-outside directive */
 Vue.directive("click-outside", {
