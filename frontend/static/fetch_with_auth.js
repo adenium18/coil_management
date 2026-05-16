@@ -39,7 +39,7 @@ export const fetchWithAuth = async (url = '/', options = { auth: true }) => {
   try {
     const res = await fetch(`${API_BASE}${url}`, fetchOptions);
 
-    if (res.status === 403 || res.status === 405) {
+    if (res.status === 401 || res.status === 403 || res.status === 405) {
       router.push('/user_login');
       return;
     }

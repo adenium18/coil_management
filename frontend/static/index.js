@@ -30,7 +30,7 @@ new Vue({
     <Sidebar
       v-if="showSidebar"
       :collapsed="sidebarCollapsed"
-      :key="authKey"
+      :auth-key="authKey"
     />
 
     <div
@@ -48,7 +48,7 @@ new Vue({
     >
       <TopBar
         :sidebar-collapsed="sidebarCollapsed"
-        :key="'tb-' + authKey"
+        :auth-key="authKey"
         @toggle-sidebar="toggleSidebar"
       >
         <template v-slot:actions v-if="showSidebar && isOwner">
@@ -91,8 +91,13 @@ new Vue({
   },
 
   watch: {
-    $route() {
-      this.authKey++;
+    $route(to, from) {
+      // Only bump authKey when transitioning between public ↔ private routes
+      // (i.e. login/logout). Remounting Sidebar+TopBar on every nav is wasteful
+      // and causes the sidebar to flicker or lose its open state.
+      const wasPublic = PUBLIC_ROUTES.has(from.path);
+      const isPublic  = PUBLIC_ROUTES.has(to.path);
+      if (wasPublic !== isPublic) this.authKey++;
       if (this.isMobile) this.sidebarCollapsed = true;
     },
   },

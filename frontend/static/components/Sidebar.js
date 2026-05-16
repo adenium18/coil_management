@@ -1,7 +1,8 @@
 export default {
   name: "Sidebar",
   props: {
-    collapsed: { type: Boolean, default: false }
+    collapsed: { type: Boolean, default: false },
+    authKey:   { type: Number, default: 0 },
   },
   template: `
   <aside class="sidebar" :class="{ 'sidebar--collapsed': collapsed }">
@@ -111,9 +112,11 @@ export default {
   `,
 
   computed: {
-    isAdmin() { return localStorage.getItem("role") === "admin"; },
-    roleLabel() { return this.isAdmin ? "Super Admin" : "Coil Manager"; },
+    isAdmin()    { return localStorage.getItem("role") === "admin"; },
+    roleLabel()  { return this.isAdmin ? "Super Admin" : "Coil Manager"; },
     fullName() {
+      // authKey dependency ensures this re-evaluates after login/logout.
+      void this.authKey;
       const n = localStorage.getItem("full_name");
       return n || (this.isAdmin ? "Admin" : "Owner");
     },

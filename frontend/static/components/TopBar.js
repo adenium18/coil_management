@@ -1,7 +1,8 @@
 export default {
   name: "TopBar",
   props: {
-    sidebarCollapsed: { type: Boolean, default: false }
+    sidebarCollapsed: { type: Boolean, default: false },
+    authKey:          { type: Number,  default: 0 },
   },
   template: `
   <header class="topbar">
@@ -57,7 +58,10 @@ export default {
     isAuthenticated() { return !!localStorage.getItem("auth-token"); },
     isAdmin()  { return localStorage.getItem("role") === "admin"; },
     isOwner()  { return localStorage.getItem("role") === "owner"; },
-    fullName() { return localStorage.getItem("full_name") || "User"; },
+    fullName() {
+      void this.authKey; // re-evaluate after login/logout
+      return localStorage.getItem("full_name") || "User";
+    },
     userInitial() { return (this.fullName)[0].toUpperCase(); },
 
     routeMeta() {
