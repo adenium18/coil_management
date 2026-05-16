@@ -4,6 +4,9 @@ import { localdb }   from "./js/localdb.js";
 
 const WRITE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
+// In Electron the Flask server is always local — internet connectivity is irrelevant.
+const IS_ELECTRON = !!(window.electronAPI?.isElectron);
+
 export const fetchWithAuth = async (url = '/', options = { auth: true }) => {
   const token = localStorage.getItem('user')
     ? JSON.parse(localStorage.getItem('user'))?.token
@@ -45,8 +48,9 @@ export const fetchWithAuth = async (url = '/', options = { auth: true }) => {
 
   } catch (err) {
     // ── Offline fallback ───────────────────────────────────────────────────
+    // Skip in Electron: Flask is always running locally regardless of internet.
 
-    if (!navigator.onLine) {
+    if (!IS_ELECTRON && !navigator.onLine) {
       if (WRITE_METHODS.has(method)) {
         // Queue the write for later sync
         try {

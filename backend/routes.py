@@ -85,6 +85,17 @@ def home():
     return render_template("index.html")
 
 
+# Catch-all for Vue Router history-mode routes (e.g. refresh on /dashboard).
+# Must come before any 404 handler but after all /api/* routes.
+@app.get("/<path:path>")
+def spa_catchall(path):
+    # Let Flask still handle /static/ and /api/ normally.
+    if path.startswith(("static/", "api/", "delete/")):
+        from flask import abort
+        abort(404)
+    return render_template("index.html")
+
+
 @app.get("/admin")
 @auth_required("token")
 @roles_required("admin")
