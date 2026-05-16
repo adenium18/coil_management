@@ -13,7 +13,7 @@ export const fetchWithAuth = async (url = '/', options = { auth: true }) => {
     : localStorage.getItem('auth-token');
 
   if (options.auth && !token) {
-    router.push('/user_login');
+    router.push('/');
     return;
   }
 
@@ -40,7 +40,10 @@ export const fetchWithAuth = async (url = '/', options = { auth: true }) => {
     const res = await fetch(`${API_BASE}${url}`, fetchOptions);
 
     if (res.status === 401 || res.status === 403 || res.status === 405) {
-      router.push('/user_login');
+      // Clear stale credentials so "/" shows the info page, not dashboard.
+      ['auth-token','role','full_name','user_id','user','business_name']
+        .forEach(k => localStorage.removeItem(k));
+      router.push('/');
       return;
     }
 

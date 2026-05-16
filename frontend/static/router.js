@@ -66,15 +66,15 @@ router.beforeEach((to, from, next) => {
     const role  = localStorage.getItem("role");
 
     if (to.meta.requiresAuth && !token) {
-        return next("/user_login");
+        return next("/");
     }
 
     if (to.meta.adminOnly && role !== "admin") {
-        return next(role === "owner" ? "/dashboard" : "/user_login");
+        return next(role === "owner" ? "/dashboard" : "/");
     }
 
     if (to.meta.ownerOnly && role !== "owner") {
-        return next(role === "admin" ? "/admin-dashboard" : "/user_login");
+        return next(role === "admin" ? "/admin-dashboard" : "/");
     }
 
     // Redirect authenticated users away from public-only pages
